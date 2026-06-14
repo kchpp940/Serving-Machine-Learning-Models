@@ -3,28 +3,52 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import joblib
+import numpy as np
+
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import (
-    FEATURE_ORDER,
-    find_model_path,
-)
+from car_pricing.feature_schema import FEATURE_ORDER
 
 
-_INTERFACE_FIELDS = list(FEATURE_ORDER)
-
-_model: CarPriceModel = None
+_model = None
 
 
-def _get_model() -> CarPriceModel:
+def _get_model():
     global _model
     if _model is None:
-        local_dir = os.path.join(os.path.dirname(__file__), "models")
-        model_path = find_model_path(local_dir=local_dir)
+        model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(
+                os.path.dirname(__file__), "..", "shared_models", "sklearn_gbr.pkl"
+            )
         _model = CarPriceModel.from_joblib(model_path)
-        _model.validate_service(_INTERFACE_FIELDS)
+        _model.schema.validate()
     return _model
 
 
-def predict_price(**kwargs):
+def predict_price(
+    enginesize,
+    curbweight,
+    horsepower,
+    highwaympg,
+    carwidth,
+    wheelbase,
+    drivewheel,
+    citympg,
+    boreratio,
+    cylindernumber,
+):
     model = _get_model()
-    return model.predict_raw(kwargs)
+    values = {
+        "enginesize": enginesize,
+        "curbweight": curbweight,
+        "horsepower": horsepower,
+        "highwaympg": highwaympg,
+        "carwidth": carwidth,
+        "wheelbase": wheelbase,
+        "drivewheel": drivewheel,
+        "citympg": citympg,
+        "boreratio": boreratio,
+        "cylindernumber": cylindernumber,
+    }
+    return model.predict_raw(values)

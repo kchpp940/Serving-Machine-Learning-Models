@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
-
-try:
-    import joblib as _joblib
-except ImportError:  # pragma: no cover
-    _joblib = None
 
 try:
     from sklearn.preprocessing import LabelEncoder
 except ImportError:  # pragma: no cover
     LabelEncoder = None
 
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-SHARED_MODEL_DIR = os.path.join(PROJECT_ROOT, "shared_models")
-SHARED_MODEL_PATH = os.path.join(SHARED_MODEL_DIR, "sklearn_gbr.pkl")
-
-DATA_DIR = os.path.join(PROJECT_ROOT, "Data")
-CARS_CSV_PATH = os.path.join(DATA_DIR, "cars.csv")
 
 FEATURE_ORDER: List[str] = [
     "enginesize",
@@ -64,62 +50,15 @@ WORD_TO_NUM_CYLINDERS: Dict[str, int] = {
 
 NUM_TO_WORD_CYLINDERS: Dict[int, str] = {v: k for k, v in WORD_TO_NUM_CYLINDERS.items()}
 
-DRIVEWHEEL_DISPLAY: Dict[str, str] = {
+DRIVEWheel_DISPLAY: Dict[str, str] = {
     "4wd": "Four Wheel Drive (4WD)",
     "fwd": "Front Wheel Drive (FWD)",
     "rwd": "Rear Wheel Drive (RWD)",
 }
 
-FIELD_LABELS: Dict[str, str] = {
-    "names": "Car Name",
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway MPG",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheelbase",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City MPG",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
-}
 
-FIELD_DESCRIPTIONS: Dict[str, str] = {
-    "enginesize": "发动机排量 (立方英寸)",
-    "curbweight": "整备质量 (磅)",
-    "horsepower": "最大马力",
-    "highwaympg": "高速路百公里油耗换算 (MPG)",
-    "carwidth": "车身宽度 (英寸)",
-    "wheelbase": "轴距 (英寸)",
-    "drivewheel": "驱动轮类型: fwd/4wd/rwd",
-    "citympg": "城市百公里油耗换算 (MPG)",
-    "boreratio": "气缸内径与冲程比值",
-    "cylindernumber": "气缸数: two/four/six/eight 等",
-}
-
-FIELD_PLACEHOLDERS: Dict[str, str] = {
-    "enginesize": "e.g. 130",
-    "curbweight": "e.g. 2548",
-    "horsepower": "e.g. 111",
-    "highwaympg": "e.g. 27",
-    "carwidth": "e.g. 64.1",
-    "wheelbase": "e.g. 88.6",
-    "citympg": "e.g. 21",
-    "boreratio": "e.g. 3.47",
-}
-
-DEFAULT_EXAMPLE: Dict = {
-    "enginesize": 130,
-    "curbweight": 2548,
-    "horsepower": 111,
-    "highwaympg": 27,
-    "carwidth": 64.1,
-    "wheelbase": 88.6,
-    "drivewheel": "rwd",
-    "citympg": 21,
-    "boreratio": 3.47,
-    "cylindernumber": "four",
-}
+def _is_string_dtype(dtype) -> bool:
+    return pd.api.types.is_string_dtype(dtype) or dtype == "O"
 
 
 @dataclass
@@ -215,18 +154,18 @@ class FeatureSchema:
     def encode_dict(self, values: dict) -> dict:
         return {f: self.encode_feature(f, values[f]) for f in self.feature_order}
 
-    def vector_from_dict(self, values: dict) -> pd.DataFrame:
+    def vector_from_dict(self, values: dict) -> np.ndarray:
         encoded = self.encode_dict(values)
-        vector = [[encoded[name] for name in self.feature_order]]
-        return pd.DataFrame(vector, columns=self.feature_order)
+        vector = [encoded[name] for name in self.feature_order]
+        return np.array([vector])
 
-    def vector_from_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def vector_from_dataframe(self, df: pd.DataFrame) -> np.ndarray:
         encoded_rows = []
         for _, row in df.iterrows():
             encoded_rows.append(
                 [self.encode_feature(f, row[f]) for f in self.feature_order]
             )
-        return pd.DataFrame(encoded_rows, columns=self.feature_order)
+        return np.array(encoded_rows)
 
     def categorical_classes(self, field_name: str) -> list:
         if field_name not in self.categorical_encoders:
@@ -242,7 +181,7 @@ class FeatureSchema:
         for raw, code in zip(lb.classes_, codes):
             options.append({
                 "display": _display_name(field_name, raw),
-                "form_value": str(raw),
+                "form_value": raw,
                 "model_code": int(code),
             })
         return options
@@ -251,7 +190,7 @@ class FeatureSchema:
         encoder_data = {}
         for col, le in self.categorical_encoders.items():
             encoder_data[col] = {
-                "classes": [str(c) for c in le.classes_],
+                "classes": list(le.classes_),
             }
         return {
             "feature_order": list(self.feature_order),
@@ -282,217 +221,14 @@ class FeatureSchema:
     def validate_model_input(self, model) -> None:
         n_features = getattr(model, "n_features_in_", None)
         if n_features is not None and n_features != self.n_features():
-            raise SchemaMismatchError(
-                "model_n_features",
-                f"模型 n_features_in_={n_features} 与 schema 特征数 {self.n_features()} 不一致",
+            raise RuntimeError(
+                f"模型期望 n_features_in_={n_features} 但 schema 有 {self.n_features()} 个特征"
             )
-
-    def validate_against_interface(self, interface_fields: Sequence[str]) -> None:
-        schema_set = set(self.feature_order)
-        interface_set = set(interface_fields)
-        missing = schema_set - interface_set
-        extra = interface_set - schema_set
-        if missing or extra:
-            parts = []
-            if missing:
-                parts.append(f"接口缺少字段: {sorted(missing)}")
-            if extra:
-                parts.append(f"接口多余字段: {sorted(extra)}")
-            raise SchemaMismatchError(
-                "interface_mismatch",
-                f"服务接口字段与 schema 不一致 — {'; '.join(parts)}",
-            )
-
-    def default_example(self) -> dict:
-        """返回合法的请求示例，字段顺序按 feature_order。"""
-        return {name: DEFAULT_EXAMPLE[name] for name in self.feature_order}
-
-    def field_label(self, field_name: str) -> str:
-        return FIELD_LABELS.get(field_name, field_name)
-
-    def field_description(self, field_name: str) -> str:
-        return FIELD_DESCRIPTIONS.get(field_name, "")
-
-    def field_type(self, field_name: str) -> str:
-        if field_name in self.numeric_features:
-            return "number"
-        if field_name in self.categorical_features:
-            return "string"
-        return "unknown"
-
-    def field_placeholder(self, field_name: str) -> str:
-        if field_name in self.numeric_features:
-            return FIELD_PLACEHOLDERS.get(
-                field_name,
-                f"e.g. {DEFAULT_EXAMPLE.get(field_name, '')}",
-            )
-        return ""
-
-    def field_allowed_values(self, field_name: str) -> list:
-        """返回字段合法输入值列表；数值字段返回空列表。"""
-        if field_name not in self.feature_order:
-            raise ValueError(f"未知字段: {field_name}")
-        if field_name in self.categorical_features:
-            return [str(c) for c in self.categorical_classes(field_name)]
-        return []
-
-    def field_error_message(self, field_name: str, error_type: str) -> str:
-        """统一错误提示模板。error_type: required/type/invalid."""
-        label = self.field_label(field_name)
-        if error_type == "required":
-            return f"{label} cannot be empty."
-        if error_type == "type":
-            if field_name in self.numeric_features:
-                return f"{label} must be a valid number (decimals allowed)."
-            return f"{label} must be a valid string."
-        if error_type == "invalid":
-            if field_name in self.categorical_features:
-                allowed = ", ".join(self.field_allowed_values(field_name))
-                return f"{label} must be one of: [{allowed}]"
-            return f"{label} contains an invalid value."
-        return f"{label} has an error."
-
-    def schema_export(self) -> dict:
-        """FastAPI /schema 端点标准返回体。三端共用。"""
-        return {
-            "feature_order": list(self.feature_order),
-            "numeric_features": list(self.numeric_features),
-            "categorical_features": list(self.categorical_features),
-            "target_column": self.target_column,
-            "fields": {
-                name: {
-                    "name": name,
-                    "label": self.field_label(name),
-                    "description": self.field_description(name),
-                    "type": self.field_type(name),
-                    "python_type": "float" if self.field_type(name) == "number" else "str",
-                    "placeholder": self.field_placeholder(name),
-                    "allowed_values": self.field_allowed_values(name),
-                    "options": (
-                        self.categorical_options(name)
-                        if name in self.categorical_features
-                        else []
-                    ),
-                    "example": DEFAULT_EXAMPLE.get(name),
-                    "error_messages": {
-                        "required": self.field_error_message(name, "required"),
-                        "type": self.field_error_message(name, "type"),
-                        "invalid": self.field_error_message(name, "invalid"),
-                    },
-                }
-                for name in self.feature_order
-            },
-            "example": self.default_example(),
-        }
-
-    def form_fields_metadata(self, extra_fields: list = None) -> list:
-        """Flask 模板使用的表单元数据列表，按 feature_order 顺序。
-
-        extra_fields: 额外插入到表单开头的非模型字段 (如 "names")。
-        """
-        items = []
-        if extra_fields:
-            for name in extra_fields:
-                items.append({
-                    "name": name,
-                    "label": FIELD_LABELS.get(name, name),
-                    "description": FIELD_DESCRIPTIONS.get(name, ""),
-                    "kind": "text_extra",
-                    "placeholder": "",
-                    "allowed_values": [],
-                    "options": [],
-                    "example": "",
-                    "required_error": f"{FIELD_LABELS.get(name, name)} cannot be empty.",
-                    "type_error": "",
-                })
-        for name in self.feature_order:
-            if name in self.categorical_features:
-                kind = "select"
-            else:
-                kind = "number"
-            items.append({
-                "name": name,
-                "label": self.field_label(name),
-                "description": self.field_description(name),
-                "kind": kind,
-                "placeholder": self.field_placeholder(name),
-                "allowed_values": self.field_allowed_values(name),
-                "options": (
-                    self.categorical_options(name)
-                    if name in self.categorical_features
-                    else []
-                ),
-                "example": DEFAULT_EXAMPLE.get(name),
-                "required_error": self.field_error_message(name, "required"),
-                "type_error": self.field_error_message(name, "type"),
-                "invalid_error": self.field_error_message(name, "invalid"),
-            })
-        return items
-
-    def input_spec(self) -> dict:
-        """BentoML 或 OpenAPI 使用的输入规范描述。"""
-        return {
-            "format": "dataframe or dict",
-            "n_features": self.n_features(),
-            "columns": list(self.feature_order),
-            "column_dtypes": {
-                name: ("float32" if self.field_type(name) == "number" else "string")
-                for name in self.feature_order
-            },
-            "example": self.default_example(),
-            "fields": [
-                {
-                    "name": name,
-                    "type": self.field_type(name),
-                    "allowed_values": self.field_allowed_values(name),
-                }
-                for name in self.feature_order
-            ],
-        }
-
-
-class SchemaMismatchError(RuntimeError):
-    def __init__(self, check_name: str, detail: str):
-        self.check_name = check_name
-        self.detail = detail
-        super().__init__(f"[{check_name}] {detail}")
-
-
-def validate_service_schema(
-    schema: FeatureSchema,
-    model,
-    interface_fields: Sequence[str],
-) -> List[str]:
-    errors: List[str] = []
-
-    try:
-        schema.validate()
-    except (ValueError, SchemaMismatchError) as e:
-        errors.append(str(e))
-
-    try:
-        schema.validate_model_input(model)
-    except SchemaMismatchError as e:
-        errors.append(str(e))
-
-    try:
-        schema.validate_against_interface(interface_fields)
-    except SchemaMismatchError as e:
-        errors.append(str(e))
-
-    n_features = getattr(model, "n_features_in_", None)
-    if n_features is not None and len(interface_fields) != n_features:
-        errors.append(
-            f"[model_vs_interface] 模型 n_features_in_={n_features} "
-            f"但接口字段数={len(interface_fields)}"
-        )
-
-    return errors
 
 
 def _display_name(field_name: str, raw_class: str) -> str:
     if field_name == "drivewheel":
-        return DRIVEWHEEL_DISPLAY.get(raw_class, raw_class.upper())
+        return DRIVEWheel_DISPLAY.get(raw_class, raw_class.upper())
     if field_name == "cylindernumber":
         num = WORD_TO_NUM_CYLINDERS.get(raw_class.lower())
         if num is not None:
@@ -501,9 +237,7 @@ def _display_name(field_name: str, raw_class: str) -> str:
     return raw_class
 
 
-def load_training_data(csv_path: str | None = None) -> pd.DataFrame:
-    if csv_path is None:
-        csv_path = CARS_CSV_PATH
+def load_training_data(csv_path: str) -> pd.DataFrame:
     usecols = FEATURE_ORDER + [TARGET_COLUMN]
     df = pd.read_csv(csv_path, usecols=usecols)
     return df
@@ -519,331 +253,12 @@ def prepare_training_data(df: pd.DataFrame) -> tuple:
 
 
 def bundle_model(model, schema: FeatureSchema) -> dict:
-    return {
+    bundle = {
         "model": model,
         "schema": schema.to_dict(),
     }
+    return bundle
 
 
 def is_model_bundle(obj) -> bool:
     return isinstance(obj, dict) and "model" in obj and "schema" in obj
-
-
-def save_bundle(bundle: dict, path: str) -> None:
-    if _joblib is None:
-        raise RuntimeError("需要 joblib 才能保存模型")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    _joblib.dump(bundle, path)
-
-
-def load_bundle(path: str) -> dict:
-    if _joblib is None:
-        raise RuntimeError("需要 joblib 才能加载模型")
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"模型文件不存在: {path}")
-    return _joblib.load(path)
-
-
-def find_model_path(local_dir: str | None = None, local_name: str = "sklearn_gbr.pkl") -> str:
-    if local_dir is not None:
-        local_path = os.path.join(local_dir, local_name)
-        if os.path.exists(local_path):
-            return local_path
-    if os.path.exists(SHARED_MODEL_PATH):
-        return SHARED_MODEL_PATH
-    raise FileNotFoundError(
-        f"未找到模型文件: 已搜索 {local_dir or '<无本地路径>'} 和 {SHARED_MODEL_PATH}"
-    )
-
-
-# -----------------------------
-# Pydantic v1 / v2 兼容辅助
-# -----------------------------
-
-try:
-    import pydantic as _pydantic
-    _PYDANTIC_MAJOR = int(_pydantic.VERSION.split(".")[0])
-except ImportError:  # pragma: no cover
-    _pydantic = None
-    _PYDANTIC_MAJOR = 0
-
-
-def pydantic_major_version() -> int:
-    """返回当前安装的 Pydantic 主版本号 (1 或 2)；未安装时返回 0。"""
-    return _PYDANTIC_MAJOR
-
-
-def pydantic_field_names(model_cls) -> List[str]:
-    """跨 v1/v2 获取模型字段名列表，按定义顺序。"""
-    if _PYDANTIC_MAJOR >= 2:
-        return list(model_cls.model_fields.keys())
-    return list(model_cls.__fields__.keys())
-
-
-def build_car_prediction_model(
-    feature_order: List[str] = None,
-    categorical_features: List[str] = None,
-    example: dict = None,
-    class_name: str = "CarPrediction",
-):
-    """根据 FeatureSchema 常量动态生成 Pydantic 请求模型，v1/v2 都可用。
-
-    - 数值字段 -> float
-    - 分类字段 -> str
-    - 自动校验生成的模型字段与 feature_order 完全一致
-    - 通过 `pydantic_field_names()` 读取字段顺序，避免 v1/v2 API 漂移
-    """
-    if _pydantic is None:
-        raise RuntimeError("需要 pydantic 才能使用 build_car_prediction_model")
-
-    if feature_order is None:
-        feature_order = list(FEATURE_ORDER)
-    if categorical_features is None:
-        categorical_features = list(CATEGORICAL_FEATURES)
-    if example is None:
-        example = dict(DEFAULT_EXAMPLE)
-
-    cat_set = set(categorical_features)
-    annotations = {}
-    for name in feature_order:
-        annotations[name] = str if name in cat_set else float
-
-    namespace = {"__annotations__": annotations, "__module__": __name__}
-
-    if _PYDANTIC_MAJOR >= 2:
-        namespace["model_config"] = {"json_schema_extra": {"example": example}}
-    else:
-        config_ns = {"schema_extra": {"example": example}}
-        namespace["Config"] = type("Config", (), config_ns)
-
-    BaseModel = _pydantic.BaseModel
-    model_cls = type(class_name, (BaseModel,), namespace)
-
-    actual = pydantic_field_names(model_cls)
-    if actual != list(feature_order):
-        raise RuntimeError(
-            f"生成的 Pydantic 模型字段 {actual} 与 feature_order {list(feature_order)} 不一致"
-        )
-
-    return model_cls
-
-
-def interface_fields_from_model(model_cls) -> List[str]:
-    """从 Pydantic 模型提取接口字段列表，保证三端校验使用同一份字段定义。"""
-    return pydantic_field_names(model_cls)
-
-
-# -----------------------------
-# 支持版本矩阵 & 启动自检
-# -----------------------------
-
-SUPPORTED_PYDANTIC_MAJORS = {1, 2}
-
-SUPPORTED_FASTAPI_VERSIONS = {
-    1: {  # Pydantic v1 对应 FastAPI 版本范围
-        "min": "0.65.0",
-        "max": "0.100.0",
-    },
-    2: {  # Pydantic v2 对应 FastAPI 版本范围
-        "min": "0.100.0",
-        "max": None,
-    },
-}
-
-
-def _parse_version(ver_str: str) -> tuple:
-    return tuple(int(p) for p in ver_str.split(".")[:3])
-
-
-def _version_in_range(ver_str: str, min_ver: str | None, max_ver: str | None) -> bool:
-    ver = _parse_version(ver_str)
-    if min_ver is not None and ver < _parse_version(min_ver):
-        return False
-    if max_ver is not None and ver >= _parse_version(max_ver):
-        return False
-    return True
-
-
-def check_dependency_versions(
-    pydantic_version: str | None = None,
-    fastapi_version: str | None = None,
-) -> List[str]:
-    """检查当前环境的 Pydantic + FastAPI 版本是否在支持矩阵内。
-
-    返回错误/警告列表；空列表表示全部通过。
-    """
-    issues: List[str] = []
-
-    if pydantic_version is None:
-        if _pydantic is None:
-            issues.append("pydantic 未安装")
-            return issues
-        pydantic_version = _pydantic.VERSION
-
-    pydantic_major = int(pydantic_version.split(".")[0])
-    if pydantic_major not in SUPPORTED_PYDANTIC_MAJORS:
-        issues.append(
-            f"Pydantic {pydantic_version} 不在支持的主版本范围 "
-            f"{sorted(SUPPORTED_PYDANTIC_MAJORS)} 内"
-        )
-        return issues
-
-    if fastapi_version is None:
-        try:
-            import fastapi as _fastapi
-            fastapi_version = _fastapi.__version__
-        except ImportError:
-            issues.append("fastapi 未安装，无法做版本组合校验")
-            return issues
-
-    if pydantic_major in SUPPORTED_FASTAPI_VERSIONS:
-        spec = SUPPORTED_FASTAPI_VERSIONS[pydantic_major]
-        if not _version_in_range(fastapi_version, spec["min"], spec["max"]):
-            max_display = spec["max"] or "latest"
-            issues.append(
-                f"Pydantic v{pydantic_major} 推荐 FastAPI {spec['min']} ~ {max_display}, "
-                f"当前 FastAPI {fastapi_version} 可能存在兼容问题"
-            )
-
-    return issues
-
-
-class DependencyVersionWarning(Warning):
-    pass
-
-
-def pydantic_model_schema(model_cls) -> dict:
-    """跨 v1/v2 获取 Pydantic 模型的 JSON Schema。"""
-    if _PYDANTIC_MAJOR >= 2:
-        return model_cls.model_json_schema()
-    return model_cls.schema()
-
-
-def self_check_pydantic_model(
-    model_cls,
-    feature_order: List[str] = None,
-    categorical_features: List[str] = None,
-) -> List[str]:
-    """对动态生成的 Pydantic 请求模型做自检。
-
-    检查项：
-    1. 字段顺序和 feature_order 一致
-    2. 字段数量匹配
-    3. 分类字段是 str 类型，数值字段是 float 类型
-    4. example 字段数与 feature_order 一致
-    5. OpenAPI schema 中每个字段的 type 符合预期
-    """
-    issues: List[str] = []
-
-    if feature_order is None:
-        feature_order = list(FEATURE_ORDER)
-    if categorical_features is None:
-        categorical_features = list(CATEGORICAL_FEATURES)
-
-    cat_set = set(categorical_features)
-    num_set = set(feature_order) - cat_set
-
-    fields = pydantic_field_names(model_cls)
-    if fields != list(feature_order):
-        issues.append(
-            f"Pydantic 模型字段顺序 {fields} 与 feature_order {list(feature_order)} 不一致"
-        )
-
-    if len(fields) != len(feature_order):
-        issues.append(
-            f"Pydantic 模型字段数 {len(fields)} 与 schema 特征数 {len(feature_order)} 不一致"
-        )
-
-    annotations = model_cls.__annotations__
-    for name in feature_order:
-        if name not in annotations:
-            issues.append(f"Pydantic 模型缺少字段 {name}")
-            continue
-        expected = str if name in cat_set else float
-        actual = annotations[name]
-        if actual != expected:
-            issues.append(
-                f"字段 {name} 类型不一致: 期望 {expected.__name__}, 实际 {actual.__name__}"
-            )
-
-    schema = pydantic_model_schema(model_cls)
-    properties = schema.get("properties", {})
-    for name in feature_order:
-        if name not in properties:
-            issues.append(f"OpenAPI schema 缺少字段 {name}")
-            continue
-        prop = properties[name]
-        schema_type = prop.get("type", "")
-        if name in cat_set and schema_type != "string":
-            issues.append(
-                f"OpenAPI schema 中 {name} 类型应为 string, 实际 {schema_type}"
-            )
-        elif name in num_set and schema_type not in ("number", "integer"):
-            issues.append(
-                f"OpenAPI schema 中 {name} 类型应为 number, 实际 {schema_type}"
-            )
-
-    example = schema.get("example", {})
-    if isinstance(example, dict):
-        missing = set(feature_order) - set(example.keys())
-        if missing:
-            issues.append(f"OpenAPI schema example 缺少字段: {sorted(missing)}")
-
-    return issues
-
-
-def run_startup_self_check(
-    pydantic_model_cls=None,
-    feature_order: List[str] = None,
-    categorical_features: List[str] = None,
-    strict: bool = False,
-) -> dict:
-    """启动时执行的完整自检。
-
-    返回 {
-        "passed": bool,
-        "dependency_issues": [...],
-        "schema_issues": [...],
-        "pydantic_version": str,
-        "fastapi_version": str | None,
-        "feature_order": [...],
-    }
-    """
-    if feature_order is None:
-        feature_order = list(FEATURE_ORDER)
-
-    dep_issues: List[str] = []
-    schema_issues: List[str] = []
-
-    pydantic_ver = _pydantic.VERSION if _pydantic else "unknown"
-    fastapi_ver = None
-
-    try:
-        import fastapi as _fastapi
-        fastapi_ver = _fastapi.__version__
-    except ImportError:
-        pass
-
-    dep_issues = check_dependency_versions(
-        pydantic_version=pydantic_ver,
-        fastapi_version=fastapi_ver,
-    )
-
-    if pydantic_model_cls is not None:
-        schema_issues = self_check_pydantic_model(
-            pydantic_model_cls,
-            feature_order=feature_order,
-            categorical_features=categorical_features,
-        )
-
-    passed = len(dep_issues) == 0 and len(schema_issues) == 0
-
-    return {
-        "passed": passed,
-        "dependency_issues": dep_issues,
-        "schema_issues": schema_issues,
-        "pydantic_version": pydantic_ver,
-        "fastapi_version": fastapi_ver,
-        "feature_order": list(feature_order),
-        "strict": strict,
-    }

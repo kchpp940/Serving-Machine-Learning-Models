@@ -1,9 +1,12 @@
+import os
 from kivymd.app import MDApp
 from kivy.lang.builder import Builder
 from kivy.uix.screenmanager import Screen, ScreenManager
 import certifi as cfi
 import requests as re
-import json
+
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 
 Builder_string = """
@@ -180,16 +183,35 @@ class MainApp(MDApp):
             "boreratio": boreratio,
             "cylindernumber": cylindernumber
         }
-        url = f"https://carpriceapi.herokuapp.com/predict/"
-        self.request = re.post(url=url, json=values)
-        self.request = json.dumps(self.request.json())
-        self.request = json.loads(self.request)
+        url = f"{API_BASE_URL.rstrip('/')}/predict"
+        output = self.help_string.get_screen("main").ids.output_text
+        try:
+            resp = re.post(url=url, json=values, timeout=REQUEST_TIMEOUT, verify=cfi.where())
+            resp.raise_for_status()
+            body = resp.json()
+            prediction = body.get("prediction")
+            if prediction is None:
+                output.text = f"Error: unexpected response from server"
+            else:
+                output.text = f"Predicted Price: {prediction:.2f}$"
+        except re.exceptions.ConnectionError:
+            output.text = "Error: cannot connect to prediction service"
+        except re.exceptions.Timeout:
+            output.text = "Error: request timed out, please try again"
+        except re.exceptions.HTTPError:
+            detail = ""
+            try:
+                detail = resp.json().get("detail", "")
+            except Exception:
+                pass
+            output.text = f"Server error: {detail or 'unknown error'}"
+        except ValueError:
+            output.text = "Error: invalid response from server"
+        except Exception as e:
+            output.text = f"Error: {str(e)}"
 
     def res(self, *args):
-        self.data = self.request
-        ans = self.data
-        self.help_string.get_screen(
-            "main").ids.output_text.text = ans
+        pass
 
 
 MainApp().run()
