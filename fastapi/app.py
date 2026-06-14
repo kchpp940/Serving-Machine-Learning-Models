@@ -3,16 +3,16 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import pandas as pd
-import joblib
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse, JSONResponse
-from fastapi import HTTPException
-from models import CarPrediction
-import numpy as np
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
+
+from models import CarPrediction, INTERFACE_FIELDS
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.feature_schema import (
+    find_model_path,
+    SchemaMismatchError,
+)
 
 
 app = FastAPI(
@@ -28,11 +28,10 @@ _model: CarPriceModel = None
 def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
-        if not os.path.exists(model_path):
-            raise RuntimeError(f"模型文件不存在: {model_path}")
+        local_dir = os.path.join(os.path.dirname(__file__), "models")
+        model_path = find_model_path(local_dir=local_dir)
         _model = CarPriceModel.from_joblib(model_path)
-        _model.schema.validate()
+        _model.validate_service(INTERFACE_FIELDS)
     return _model
 
 
@@ -40,12 +39,19 @@ def get_model() -> CarPriceModel:
 async def startup_event():
     try:
         model = get_model()
-        print(f"Model loaded successfully. Mode: {model.mode}")
-        print(f"Feature order: {model.feature_order}")
-        print(f"Expected features: {model.schema.n_features()}")
-        print(f"Model n_features_in_: {model.model.n_features_in_}")
+        info = model.model_info()
+        print("Model loaded successfully.")
+        print(f"  mode:             {info['mode']}")
+        print(f"  n_features_in_:   {info['n_features_in_']}")
+        print(f"  schema_features:  {info['schema_n_features']}")
+        print(f"  feature_order:    {info['feature_order']}")
+        print(f"  interface_fields: {INTERFACE_FIELDS}")
+        print("Schema validation: PASSED")
+    except SchemaMismatchError as e:
+        print(f"FATAL - Schema mismatch on startup: {e}")
+        raise
     except Exception as e:
-        print(f"Failed to load model on startup: {e}")
+        print(f"FATAL - Failed to load model on startup: {e}")
         raise
 
 
@@ -81,6 +87,12 @@ async def get_schema():
     }
 
 
+@app.get("/model_info")
+async def get_model_info():
+    model = get_model()
+    return model.model_info()
+
+
 @app.post("/predict")
 def predict(data: CarPrediction):
     try:
@@ -90,5 +102,7 @@ def predict(data: CarPrediction):
         return {"predicted_price": value}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except SchemaMismatchError as e:
+        raise HTTPException(status_code=500, detail=f"Schema 不一致: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")

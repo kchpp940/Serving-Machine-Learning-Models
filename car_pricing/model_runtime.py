@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+from typing import List, Sequence
 import numpy as np
 import pandas as pd
 
@@ -12,6 +12,8 @@ from car_pricing.feature_schema import (
     TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
+    SchemaMismatchError,
+    validate_service_schema,
 )
 
 try:
@@ -20,13 +22,13 @@ except ImportError:  # pragma: no cover
     joblib = None
 
 
-_DEFAULT_FEATURE_ORDER_LEGACY = list(FEATURE_ORDER)
-_NUMERIC_FEATURE_SET = set(NUMERIC_FEATURES)
-_CATEGORICAL_FEATURE_SET = set(CATEGORICAL_FEATURES)
-
-
 def _is_legacy_bundle(obj) -> bool:
-    return isinstance(obj, dict) and "model" in obj and "feature_order" in obj and "schema" not in obj
+    return (
+        isinstance(obj, dict)
+        and "model" in obj
+        and "feature_order" in obj
+        and "schema" not in obj
+    )
 
 
 class CarPriceModel:
@@ -34,7 +36,7 @@ class CarPriceModel:
 
     支持三种格式（按优先级）：
     1. Schema Bundle（新格式）：{"model": ..., "schema": {...}}
-    2. Legacy Bundle（旧格式）：{"model": ..., "feature_order": [...], "categorical_encoders": {...}}
+    2. Legacy Bundle（旧格式）：{"model": ..., "feature_order": [...], ...}
     3. Legacy 裸模型：直接 sklearn 模型对象，回退到硬编码特征顺序
     """
 
@@ -66,7 +68,6 @@ class CarPriceModel:
         )
         legacy_encoders = raw.get("categorical_encoders", {})
         if legacy_encoders:
-            from sklearn.preprocessing import LabelEncoder
             encoders = {}
             for col, lb in legacy_encoders.items():
                 encoders[col] = lb
@@ -100,8 +101,9 @@ class CarPriceModel:
         expected = self.schema.n_features()
         actual = getattr(self.model, "n_features_in_", expected)
         if actual != expected:
-            raise RuntimeError(
-                f"模型 n_features_in_={actual} 与 schema 特征数 {expected} 不一致"
+            raise SchemaMismatchError(
+                "model_n_features",
+                f"模型 n_features_in_={actual} 与 schema 特征数 {expected} 不一致",
             )
         self.schema.validate_model_input(self.model)
 
@@ -114,9 +116,15 @@ class CarPriceModel:
 
     @classmethod
     def from_sklearn_object(cls, model) -> "CarPriceModel":
-        if is_model_bundle(model) or _is_legacy_bundle(model):
-            return cls(model)
         return cls(model)
+
+    def validate_service(self, interface_fields: Sequence[str]) -> None:
+        errors = validate_service_schema(
+            self.schema, self.model, interface_fields
+        )
+        if errors:
+            msg = "服务 schema 校验失败:\n" + "\n".join(f"  - {e}" for e in errors)
+            raise SchemaMismatchError("service_validation", msg)
 
     # ---------- 元数据 ----------
 
@@ -136,7 +144,21 @@ class CarPriceModel:
     def target_column(self) -> str:
         return self.schema.target_column
 
-    def categorical_classes(self, field_name: str):
+    def model_info(self) -> dict:
+        return {
+            "mode": self.mode,
+            "n_features_in_": getattr(self.model, "n_features_in_", None),
+            "schema_n_features": self.schema.n_features(),
+            "feature_order": self.feature_order,
+            "numeric_features": self.numeric_features,
+            "categorical_features": self.categorical_features,
+            "target_column": self.target_column,
+            "categorical_options": {
+                f: self.schema.categorical_options(f) for f in self.categorical_features
+            },
+        }
+
+    def categorical_classes(self, field_name: str) -> list:
         return self.schema.categorical_classes(field_name)
 
     def categorical_options(self, field_name: str) -> list:
@@ -152,11 +174,8 @@ class CarPriceModel:
 
     # ---------- 推理 ----------
 
-    def _vector_from_encoded(self, encoded: dict) -> np.ndarray:
-        return self.schema.vector_from_dict(encoded)
-
     def predict_encoded(self, encoded: dict) -> np.ndarray:
-        data = self._vector_from_encoded(encoded)
+        data = self.schema.vector_from_dict(encoded)
         return self.model.predict(data)
 
     def predict_raw(self, values: dict) -> np.ndarray:
@@ -166,8 +185,6 @@ class CarPriceModel:
     def predict_dataframe(self, df: pd.DataFrame) -> np.ndarray:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
-
-    # ---------- FastAPI 兼容层 ----------
 
     def predict_from_pydantic(self, data) -> np.ndarray:
         encoded = {f: self.encode_feature(f, getattr(data, f)) for f in self.feature_order}

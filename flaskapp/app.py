@@ -1,5 +1,13 @@
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from flask import Flask, render_template, request
 import utils
+
+from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+
 
 app = Flask(__name__)
 
@@ -17,18 +25,8 @@ FIELD_LABELS = {
     "cylindernumber": "Number of Cylinders",
 }
 
-NUMERIC_FIELDS = [
-    "enginesize",
-    "curbweight",
-    "horsepower",
-    "highwaympg",
-    "carwidth",
-    "wheelbase",
-    "drivewheel",
-    "citympg",
-    "boreratio",
-    "cylindernumber",
-]
+PREDICTION_FIELDS = list(FEATURE_ORDER)
+CATEGORICAL_SET = set(CATEGORICAL_FEATURES)
 
 
 @app.route("/")
@@ -47,17 +45,20 @@ def predict():
         if not names:
             errors["names"] = "Car name cannot be empty."
 
-        for field in NUMERIC_FIELDS:
+        for field in PREDICTION_FIELDS:
             raw_value = form_data.get(field, "").strip()
             if not raw_value:
-                errors[field] = f"{FIELD_LABELS[field]} cannot be empty."
+                errors[field] = f"{FIELD_LABELS.get(field, field)} cannot be empty."
                 continue
-            try:
-                parsed[field] = float(raw_value)
-            except (ValueError, TypeError):
-                errors[field] = (
-                    f"{FIELD_LABELS[field]} must be a valid number (decimals allowed)."
-                )
+            if field in CATEGORICAL_SET:
+                parsed[field] = raw_value
+            else:
+                try:
+                    parsed[field] = float(raw_value)
+                except (ValueError, TypeError):
+                    errors[field] = (
+                        f"{FIELD_LABELS.get(field, field)} must be a valid number (decimals allowed)."
+                    )
 
         if errors:
             return render_template(
@@ -65,18 +66,7 @@ def predict():
             )
 
         try:
-            predicts = utils.predict_price(
-                parsed["enginesize"],
-                parsed["curbweight"],
-                parsed["horsepower"],
-                parsed["highwaympg"],
-                parsed["carwidth"],
-                parsed["wheelbase"],
-                parsed["drivewheel"],
-                parsed["citympg"],
-                parsed["boreratio"],
-                parsed["cylindernumber"],
-            )
+            predicts = utils.predict_price(**parsed)
             value = str(predicts)[1:-1]
             return render_template(
                 "result.html", result=f"The Price of the {names} is: {value}$"

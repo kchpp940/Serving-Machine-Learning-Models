@@ -11,28 +11,24 @@ import numpy as np
 import pandas as pd
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.feature_schema import FEATURE_ORDER, SchemaMismatchError
 
 
 predictor = bentoml.sklearn.load_runner("gbr:latest")
 
 service = bentoml.Service("gbr", runners=[predictor])
 
+_INTERFACE_FIELDS = list(FEATURE_ORDER)
 
-def _get_schema():
-    raw_bundle = bentoml.sklearn.load_model("gbr:latest")
-    model = CarPriceModel.from_sklearn_object(raw_bundle)
-    return model
+_model: CarPriceModel = None
 
 
-_model = None
-
-
-def get_model():
+def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        _model = _get_schema()
-        _model.schema.validate()
+        raw_bundle = bentoml.sklearn.load_model("gbr:latest")
+        _model = CarPriceModel.from_sklearn_object(raw_bundle)
+        _model.validate_service(_INTERFACE_FIELDS)
     return _model
 
 
@@ -40,13 +36,13 @@ def get_model():
 def predict(df: pd.DataFrame) -> np.ndarray:
     model = get_model()
 
-    missing_cols = set(FEATURE_ORDER) - set(df.columns)
+    missing_cols = set(model.feature_order) - set(df.columns)
     if missing_cols:
-        raise ValueError(f"输入数据缺少列: {missing_cols}")
+        raise ValueError(f"输入数据缺少列: {sorted(missing_cols)}")
 
-    extra_cols = set(df.columns) - set(FEATURE_ORDER)
+    extra_cols = set(df.columns) - set(model.feature_order)
     if extra_cols:
-        df = df[FEATURE_ORDER]
+        df = df[model.feature_order]
 
     result = model.predict_dataframe(df)
     return np.array(result)

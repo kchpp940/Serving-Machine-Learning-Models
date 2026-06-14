@@ -1,15 +1,29 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Sequence
 import numpy as np
 import pandas as pd
+
+try:
+    import joblib as _joblib
+except ImportError:  # pragma: no cover
+    _joblib = None
 
 try:
     from sklearn.preprocessing import LabelEncoder
 except ImportError:  # pragma: no cover
     LabelEncoder = None
 
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+SHARED_MODEL_DIR = os.path.join(PROJECT_ROOT, "shared_models")
+SHARED_MODEL_PATH = os.path.join(SHARED_MODEL_DIR, "sklearn_gbr.pkl")
+
+DATA_DIR = os.path.join(PROJECT_ROOT, "Data")
+CARS_CSV_PATH = os.path.join(DATA_DIR, "cars.csv")
 
 FEATURE_ORDER: List[str] = [
     "enginesize",
@@ -50,15 +64,11 @@ WORD_TO_NUM_CYLINDERS: Dict[str, int] = {
 
 NUM_TO_WORD_CYLINDERS: Dict[int, str] = {v: k for k, v in WORD_TO_NUM_CYLINDERS.items()}
 
-DRIVEWheel_DISPLAY: Dict[str, str] = {
+DRIVEWHEEL_DISPLAY: Dict[str, str] = {
     "4wd": "Four Wheel Drive (4WD)",
     "fwd": "Front Wheel Drive (FWD)",
     "rwd": "Rear Wheel Drive (RWD)",
 }
-
-
-def _is_string_dtype(dtype) -> bool:
-    return pd.api.types.is_string_dtype(dtype) or dtype == "O"
 
 
 @dataclass
@@ -181,7 +191,7 @@ class FeatureSchema:
         for raw, code in zip(lb.classes_, codes):
             options.append({
                 "display": _display_name(field_name, raw),
-                "form_value": raw,
+                "form_value": str(raw),
                 "model_code": int(code),
             })
         return options
@@ -190,7 +200,7 @@ class FeatureSchema:
         encoder_data = {}
         for col, le in self.categorical_encoders.items():
             encoder_data[col] = {
-                "classes": list(le.classes_),
+                "classes": [str(c) for c in le.classes_],
             }
         return {
             "feature_order": list(self.feature_order),
@@ -221,14 +231,70 @@ class FeatureSchema:
     def validate_model_input(self, model) -> None:
         n_features = getattr(model, "n_features_in_", None)
         if n_features is not None and n_features != self.n_features():
-            raise RuntimeError(
-                f"模型期望 n_features_in_={n_features} 但 schema 有 {self.n_features()} 个特征"
+            raise SchemaMismatchError(
+                "model_n_features",
+                f"模型 n_features_in_={n_features} 与 schema 特征数 {self.n_features()} 不一致",
             )
+
+    def validate_against_interface(self, interface_fields: Sequence[str]) -> None:
+        schema_set = set(self.feature_order)
+        interface_set = set(interface_fields)
+        missing = schema_set - interface_set
+        extra = interface_set - schema_set
+        if missing or extra:
+            parts = []
+            if missing:
+                parts.append(f"接口缺少字段: {sorted(missing)}")
+            if extra:
+                parts.append(f"接口多余字段: {sorted(extra)}")
+            raise SchemaMismatchError(
+                "interface_mismatch",
+                f"服务接口字段与 schema 不一致 — {'; '.join(parts)}",
+            )
+
+
+class SchemaMismatchError(RuntimeError):
+    def __init__(self, check_name: str, detail: str):
+        self.check_name = check_name
+        self.detail = detail
+        super().__init__(f"[{check_name}] {detail}")
+
+
+def validate_service_schema(
+    schema: FeatureSchema,
+    model,
+    interface_fields: Sequence[str],
+) -> List[str]:
+    errors: List[str] = []
+
+    try:
+        schema.validate()
+    except (ValueError, SchemaMismatchError) as e:
+        errors.append(str(e))
+
+    try:
+        schema.validate_model_input(model)
+    except SchemaMismatchError as e:
+        errors.append(str(e))
+
+    try:
+        schema.validate_against_interface(interface_fields)
+    except SchemaMismatchError as e:
+        errors.append(str(e))
+
+    n_features = getattr(model, "n_features_in_", None)
+    if n_features is not None and len(interface_fields) != n_features:
+        errors.append(
+            f"[model_vs_interface] 模型 n_features_in_={n_features} "
+            f"但接口字段数={len(interface_fields)}"
+        )
+
+    return errors
 
 
 def _display_name(field_name: str, raw_class: str) -> str:
     if field_name == "drivewheel":
-        return DRIVEWheel_DISPLAY.get(raw_class, raw_class.upper())
+        return DRIVEWHEEL_DISPLAY.get(raw_class, raw_class.upper())
     if field_name == "cylindernumber":
         num = WORD_TO_NUM_CYLINDERS.get(raw_class.lower())
         if num is not None:
@@ -237,7 +303,9 @@ def _display_name(field_name: str, raw_class: str) -> str:
     return raw_class
 
 
-def load_training_data(csv_path: str) -> pd.DataFrame:
+def load_training_data(csv_path: str | None = None) -> pd.DataFrame:
+    if csv_path is None:
+        csv_path = CARS_CSV_PATH
     usecols = FEATURE_ORDER + [TARGET_COLUMN]
     df = pd.read_csv(csv_path, usecols=usecols)
     return df
@@ -253,12 +321,38 @@ def prepare_training_data(df: pd.DataFrame) -> tuple:
 
 
 def bundle_model(model, schema: FeatureSchema) -> dict:
-    bundle = {
+    return {
         "model": model,
         "schema": schema.to_dict(),
     }
-    return bundle
 
 
 def is_model_bundle(obj) -> bool:
     return isinstance(obj, dict) and "model" in obj and "schema" in obj
+
+
+def save_bundle(bundle: dict, path: str) -> None:
+    if _joblib is None:
+        raise RuntimeError("需要 joblib 才能保存模型")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _joblib.dump(bundle, path)
+
+
+def load_bundle(path: str) -> dict:
+    if _joblib is None:
+        raise RuntimeError("需要 joblib 才能加载模型")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"模型文件不存在: {path}")
+    return _joblib.load(path)
+
+
+def find_model_path(local_dir: str | None = None, local_name: str = "sklearn_gbr.pkl") -> str:
+    if local_dir is not None:
+        local_path = os.path.join(local_dir, local_name)
+        if os.path.exists(local_path):
+            return local_path
+    if os.path.exists(SHARED_MODEL_PATH):
+        return SHARED_MODEL_PATH
+    raise FileNotFoundError(
+        f"未找到模型文件: 已搜索 {local_dir or '<无本地路径>'} 和 {SHARED_MODEL_PATH}"
+    )

@@ -3,9 +3,14 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+
+
+INTERFACE_FIELDS = list(FEATURE_ORDER)
+
+_CATEGORICAL_SET = set(CATEGORICAL_FEATURES)
 
 
 class CarPrediction(BaseModel):
@@ -21,7 +26,7 @@ class CarPrediction(BaseModel):
     cylindernumber: str
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "enginesize": 130,
                 "curbweight": 2548,
@@ -35,3 +40,9 @@ class CarPrediction(BaseModel):
                 "cylindernumber": "four",
             }
         }
+
+
+assert list(CarPrediction.model_fields.keys()) == INTERFACE_FIELDS, (
+    f"CarPrediction 字段 {list(CarPrediction.model_fields.keys())} "
+    f"与 INTERFACE_FIELDS {INTERFACE_FIELDS} 不一致"
+)
