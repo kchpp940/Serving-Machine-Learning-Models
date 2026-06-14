@@ -2,6 +2,7 @@
 import os
 import logging
 from contextlib import asynccontextmanager
+from typing import Union
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
@@ -16,6 +17,7 @@ from services import (
     format_validation_errors,
     ServiceError,
     PredictionResult,
+    HealthResult,
     ErrorKind,
     FAVICON_PATH,
 )
@@ -36,25 +38,27 @@ ERROR_KIND_TO_HTTP_STATUS = {
 }
 
 
-def to_json_response(result):
-    if isinstance(result, PredictionResult):
-        return JSONResponse(
-            status_code=200,
-            content=PredictionResponse(
-                prediction=result.prediction,
-                currency=result.currency,
-                model_name=result.model_name,
-            ).dict(),
-        )
-    if isinstance(result, ServiceError):
-        status_code = ERROR_KIND_TO_HTTP_STATUS.get(result.kind, 500)
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": result.detail},
-        )
+def to_prediction_response(domain: PredictionResult) -> PredictionResponse:
+    return PredictionResponse(
+        prediction=domain.prediction,
+        currency=domain.currency,
+        model_name=domain.model_name,
+    )
+
+
+def to_health_response(domain: HealthResult) -> HealthResponse:
+    return HealthResponse(
+        status=domain.status,
+        model_available=domain.model_available,
+        model_error=domain.model_error,
+    )
+
+
+def to_json_error(error: ServiceError) -> JSONResponse:
+    status_code = ERROR_KIND_TO_HTTP_STATUS.get(error.kind, 500)
     return JSONResponse(
-        status_code=500,
-        content={"detail": "Unexpected service result type"},
+        status_code=status_code,
+        content={"detail": error.detail},
     )
 
 
@@ -85,7 +89,7 @@ app = FastAPI(
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     error = format_validation_errors(exc.errors())
-    return to_json_response(error)
+    return to_json_error(error)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -116,10 +120,10 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
 
 
 @app.get("/favicon.png", include_in_schema=False, response_model=None)
-async def favicon():
+async def favicon() -> Union[FileResponse, JSONResponse]:
     if not os.path.exists(FAVICON_PATH):
         error = ServiceError(kind=ErrorKind.NOT_FOUND, detail="Favicon not found")
-        return to_json_response(error)
+        return to_json_error(error)
     return FileResponse(FAVICON_PATH)
 
 
@@ -129,13 +133,9 @@ async def favicon():
     summary="Health check",
     description="Returns service health status and model availability.",
 )
-def health_check():
+def health_check() -> HealthResponse:
     result = check_health(model_state)
-    return HealthResponse(
-        status=result.status,
-        model_available=result.model_available,
-        model_error=result.model_error,
-    )
+    return to_health_response(result)
 
 
 @app.post(
@@ -174,6 +174,8 @@ def health_check():
         },
     },
 )
-def predict_route(data: CarPrediction):
+def predict_route(data: CarPrediction) -> Union[PredictionResponse, JSONResponse]:
     result = predict(data, model_state)
-    return to_json_response(result)
+    if isinstance(result, ServiceError):
+        return to_json_error(result)
+    return to_prediction_response(result)
