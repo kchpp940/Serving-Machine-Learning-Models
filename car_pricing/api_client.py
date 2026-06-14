@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple, Union
 
 try:
     import requests
 except ImportError:  # pragma: no cover
     requests = None
+
+from car_pricing.prediction_protocol import (
+    PredictionProtocolResult,
+    BatchProtocolItem,
+    BatchProtocolResponse,
+    DEFAULT_CURRENCY,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_STATUS,
+)
 
 
 DEFAULT_API_BASE_URL = "http://localhost:8000"
@@ -46,6 +55,14 @@ CarPriceTimeoutError = APITimeoutError
 CarPriceHTTPError = APIHTTPError
 
 
+# ---------- 协议类型的别名（api_client 对外暴露的友好名称）----------
+
+PredictionResult = PredictionProtocolResult
+BatchPredictionResultItem = BatchProtocolItem
+BatchPredictionItem = BatchProtocolItem
+BatchPredictionResponse = BatchProtocolResponse
+
+
 @dataclass
 class SchemaInfo:
     feature_order: List[str]
@@ -74,78 +91,6 @@ class SchemaInfo:
                 k: list(v) for k, v in self.categorical_options.items()
             },
         }
-
-
-@dataclass
-class PredictionResult:
-    """单条预测的 canonical 返回结果。
-
-    字段:
-        prediction: 预测价格
-        currency: 货币单位（默认 USD）
-        model_name: 模型名称
-    """
-    prediction: float
-    currency: str = "USD"
-    model_name: str = ""
-
-
-@dataclass
-class BatchPredictionResultItem:
-    """单条批量预测结果。
-
-    与服务端 BatchPredictionItem 字段完全对齐:
-        row_index/prediction/currency/model_name/error
-    """
-    row_index: int
-    prediction: Optional[float] = None
-    currency: str = "USD"
-    model_name: str = ""
-    error: Optional[str] = None
-
-
-# 批量结果字段与服务端完全对齐的别名
-BatchPredictionItem = BatchPredictionResultItem
-
-
-@dataclass
-class BatchPredictionResponse:
-    status: str = "ok"
-    total_records: int = 0
-    valid_count: int = 0
-    invalid_count: int = 0
-    results: List[BatchPredictionResultItem] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "BatchPredictionResponse":
-        results = []
-        for item in data.get("results", []):
-            results.append(BatchPredictionResultItem(
-                row_index=item["row_index"],
-                prediction=item.get("prediction"),
-                currency=item.get("currency", "USD"),
-                model_name=item.get("model_name", ""),
-                error=item.get("error"),
-            ))
-        return cls(
-            status=data.get("status", "ok"),
-            total_records=data.get("total_records", 0),
-            valid_count=data.get("valid_count", 0),
-            invalid_count=data.get("invalid_count", 0),
-            results=results,
-        )
-
-    def to_dataframe_rows(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "row_index": item.row_index,
-                "prediction": item.prediction,
-                "currency": item.currency,
-                "model_name": item.model_name,
-                "error": item.error,
-            }
-            for item in self.results
-        ]
 
 
 class CarPriceAPIClient:
@@ -214,16 +159,10 @@ class CarPriceAPIClient:
             status 字段只做兼容，不进入返回类型。
         """
         data = self._request("POST", "/predict", json=values)
-        prediction = data.get("prediction")
-        if prediction is None:
-            raise APIClientError(f"响应中缺少 prediction 字段: {data}")
-        currency = data.get("currency", "USD")
-        model_name = data.get("model_name", "")
-        return PredictionResult(
-            prediction=float(prediction),
-            currency=currency,
-            model_name=model_name,
-        )
+        try:
+            return PredictionResult.from_dict(data)
+        except (ValueError, KeyError) as e:
+            raise APIClientError(f"解析单条预测响应失败: {e}")
 
     # ---------- 批量预测 ----------
 
@@ -237,7 +176,10 @@ class CarPriceAPIClient:
             BatchPredictionResponse: 包含每条的预测或错误信息
         """
         data = self._request("POST", "/predict_batch", json={"records": records})
-        return BatchPredictionResponse.from_dict(data)
+        try:
+            return BatchPredictionResponse.from_dict(data)
+        except (ValueError, KeyError) as e:
+            raise APIClientError(f"解析批量预测响应失败: {e}")
 
     # ---------- 工具方法 ----------
 

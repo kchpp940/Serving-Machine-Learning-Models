@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
@@ -15,6 +14,15 @@ from car_pricing.feature_schema import (
     bundle_model,
     is_model_bundle,
 )
+from car_pricing.prediction_protocol import (
+    BatchProtocolItem,
+    BatchProtocolResponse,
+    build_batch_success_item,
+    build_batch_error_item,
+    build_batch_response,
+    DEFAULT_CURRENCY,
+    DEFAULT_MODEL_NAME,
+)
 
 try:
     import joblib
@@ -27,29 +35,9 @@ _NUMERIC_FEATURE_SET = set(NUMERIC_FEATURES)
 _CATEGORICAL_FEATURE_SET = set(CATEGORICAL_FEATURES)
 
 
-@dataclass
-class BatchPredictionItem:
-    row_index: int
-    prediction: Optional[float] = None
-    error: Optional[str] = None
-
-
-@dataclass
-class BatchPredictionResult:
-    total_records: int
-    valid_count: int
-    invalid_count: int
-    results: List[BatchPredictionItem] = field(default_factory=list)
-
-    def to_dicts(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "row_index": item.row_index,
-                "prediction": item.prediction,
-                "error": item.error,
-            }
-            for item in self.results
-        ]
+# ---------- 向后兼容别名（旧代码仍能 import）----------
+BatchPredictionItem = BatchProtocolItem
+BatchPredictionResult = BatchProtocolResponse
 
 
 def _is_legacy_bundle(obj) -> bool:
@@ -230,17 +218,22 @@ class CarPriceModel:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
 
-    def predict_records(self, records: list) -> BatchPredictionResult:
+    def predict_records(self, records: list) -> BatchProtocolResponse:
         """批量预测记录列表，返回带行号和错误信息的结果。"""
         feature_order = self.feature_order
-        results: List[BatchPredictionItem] = []
+        results: List[BatchProtocolItem] = []
         valid_rows: List[dict] = []
         valid_indices: List[int] = []
 
         for idx, record in enumerate(records):
             err = self.validate_record(record)
             if err is not None:
-                results.append(BatchPredictionItem(row_index=idx, error=err))
+                results.append(build_batch_error_item(
+                    idx,
+                    err,
+                    currency=DEFAULT_CURRENCY,
+                    model_name=DEFAULT_MODEL_NAME,
+                ))
                 continue
             valid_rows.append({f: record[f] for f in feature_order})
             valid_indices.append(idx)
@@ -249,19 +242,15 @@ class CarPriceModel:
             df = pd.DataFrame(valid_rows)
             predictions = self.predict_dataframe(df)
             for idx, pred in zip(valid_indices, predictions):
-                results.append(BatchPredictionItem(
-                    row_index=idx,
-                    prediction=float(pred),
+                results.append(build_batch_success_item(
+                    idx,
+                    float(pred),
+                    currency=DEFAULT_CURRENCY,
+                    model_name=DEFAULT_MODEL_NAME,
                 ))
 
         results.sort(key=lambda x: x.row_index)
-        valid_count = sum(1 for r in results if r.error is None)
-        return BatchPredictionResult(
-            total_records=len(records),
-            valid_count=valid_count,
-            invalid_count=len(records) - valid_count,
-            results=results,
-        )
+        return build_batch_response(results)
 
     # ---------- FastAPI 兼容层 ----------
 

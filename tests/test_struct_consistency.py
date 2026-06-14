@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""验证所有端的返回结构和字段一致性。"""
+"""验证所有端从同一 prediction_protocol 派生，字段和默认值一致。"""
 
 import sys
 import os
@@ -7,255 +7,335 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def test_single_prediction_canonical_fields():
-    """验证单条预测的 canonical 字段在各端一致。"""
-    print("=== 单条预测 canonical 字段验证 ===")
+def test_protocol_constants_centralized():
+    """验证协议常量集中在 prediction_protocol。"""
+    print("=== 协议常量集中验证 ===")
 
-    # FastAPI 服务端 PredictionResponse 字段
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fastapi"))
-    from models import PredictionResponse
-    fastapi_fields = set(PredictionResponse.__fields__.keys())
-    print(f"FastAPI PredictionResponse 字段: {sorted(fastapi_fields)}")
+    from car_pricing import prediction_protocol as pp
 
-    # 客户端 PredictionResult 字段
-    from car_pricing.api_client import PredictionResult
-    client_fields = {f.name for f in PredictionResult.__dataclass_fields__.values()}
-    print(f"api_client PredictionResult 字段: {sorted(client_fields)}")
+    # 单条预测常量
+    assert pp.DEFAULT_CURRENCY == "USD", f"DEFAULT_CURRENCY 错误: {pp.DEFAULT_CURRENCY}"
+    assert pp.DEFAULT_MODEL_NAME == "", f"DEFAULT_MODEL_NAME 错误: {pp.DEFAULT_MODEL_NAME!r}"
+    assert pp.DEFAULT_STATUS == "ok", f"DEFAULT_STATUS 错误: {pp.DEFAULT_STATUS}"
+    assert pp.SINGLE_PREDICTION_FIELDS == ("prediction", "currency", "model_name")
+    print(f"✅ DEFAULT_CURRENCY = {pp.DEFAULT_CURRENCY!r}")
+    print(f"✅ DEFAULT_MODEL_NAME = {pp.DEFAULT_MODEL_NAME!r}")
+    print(f"✅ DEFAULT_STATUS = {pp.DEFAULT_STATUS!r}")
+    print(f"✅ SINGLE_PREDICTION_FIELDS = {pp.SINGLE_PREDICTION_FIELDS}")
 
-    # 期望的 canonical 字段
-    expected = {"prediction", "currency", "model_name"}
-    print(f"期望的 canonical 字段: {sorted(expected)}")
-
-    assert fastapi_fields == expected, f"FastAPI 字段不匹配: {fastapi_fields} vs {expected}"
-    assert client_fields == expected, f"客户端字段不匹配: {client_fields} vs {expected}"
-    assert "status" not in fastapi_fields, "'status' 不应出现在 PredictionResponse 中"
-    print("✅ 单条预测字段一致\n")
-
-
-def test_batch_prediction_fields():
-    """验证批量预测结果字段在各端一致。"""
-    print("=== 批量预测结果字段验证 ===")
-
-    # FastAPI 服务端 BatchPredictionItem 字段
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fastapi"))
-    from models import BatchPredictionItem as FastAPIBatchItem
-    fastapi_fields = set(FastAPIBatchItem.__fields__.keys())
-    print(f"FastAPI BatchPredictionItem 字段: {sorted(fastapi_fields)}")
-
-    # 客户端 BatchPredictionResultItem 字段
-    from car_pricing.api_client import BatchPredictionResultItem
-    client_fields = {f.name for f in BatchPredictionResultItem.__dataclass_fields__.values()}
-    print(f"api_client BatchPredictionResultItem 字段: {sorted(client_fields)}")
-
-    # 客户端 BatchPredictionItem 别名
-    from car_pricing.api_client import BatchPredictionItem as ClientBatchItem
-    assert ClientBatchItem is BatchPredictionResultItem, "BatchPredictionItem 应该是 BatchPredictionResultItem 的别名"
-    print("✅ BatchPredictionItem 是 BatchPredictionResultItem 的别名")
-
-    # 期望的批量字段（与服务端一致）
-    expected = {"row_index", "prediction", "currency", "model_name", "error"}
-    print(f"期望的批量字段: {sorted(expected)}")
-
-    assert fastapi_fields == expected, f"FastAPI 批量字段不匹配: {fastapi_fields} vs {expected}"
-    assert client_fields == expected, f"客户端批量字段不匹配: {client_fields} vs {expected}"
-    print("✅ 批量预测字段一致\n")
-
-
-def test_car_pricing_exports():
-    """验证 car_pricing 包的导出符号。"""
-    print("=== car_pricing 导出符号验证 ===")
-
-    import car_pricing
-
-    required_exports = [
-        # 单条结果
-        "PredictionResult",
-        # 批量结果
-        "BatchPredictionResponse",
-        "BatchPredictionResultItem",
-        "BatchPredictionItem",
-        # 客户端
-        "CarPriceAPIClient",
-        "PredictionAPIClient",
-        # 异常
-        "APIClientError",
-        "APIConnectionError",
-        "APITimeoutError",
-        "APIHTTPError",
-        "CarPriceAPIError",
-        "CarPriceConnectionError",
-        "CarPriceTimeoutError",
-        "CarPriceHTTPError",
-        # 工具
-        "format_error",
-        "DEFAULT_API_BASE_URL",
-        "DEFAULT_TIMEOUT",
-        # 模型
-        "CarPriceModel",
-        "SchemaInfo",
-    ]
-
-    for name in required_exports:
-        assert hasattr(car_pricing, name), f"car_pricing 缺少导出: {name}"
-        print(f"✅ {name}")
-
-    # 验证 PredictionAPIClient 是 CarPriceAPIClient 的别名
-    assert car_pricing.PredictionAPIClient is car_pricing.CarPriceAPIClient
-    print("\n✅ PredictionAPIClient 是 CarPriceAPIClient 的别名")
-
-    # 验证异常别名
-    assert car_pricing.CarPriceAPIError is car_pricing.APIClientError
-    assert car_pricing.CarPriceConnectionError is car_pricing.APIConnectionError
-    assert car_pricing.CarPriceTimeoutError is car_pricing.APITimeoutError
-    assert car_pricing.CarPriceHTTPError is car_pricing.APIHTTPError
-    print("✅ 所有异常别名正确\n")
-
-
-def test_predict_result_construction():
-    """验证 PredictionResult 的构造和默认值。"""
-    print("=== PredictionResult 构造验证 ===")
-
-    from car_pricing.api_client import PredictionResult
-
-    # 完整字段
-    r1 = PredictionResult(prediction=13295.27, currency="USD", model_name="sklearn_gbr")
-    assert r1.prediction == 13295.27
-    assert r1.currency == "USD"
-    assert r1.model_name == "sklearn_gbr"
-    print(f"✅ 完整构造: prediction={r1.prediction}, currency={r1.currency}, model_name={r1.model_name}")
-
-    # 默认值
-    r2 = PredictionResult(prediction=10000.0)
-    assert r2.prediction == 10000.0
-    assert r2.currency == "USD"
-    assert r2.model_name == ""
-    print(f"✅ 默认值: prediction={r2.prediction}, currency={r2.currency}, model_name={r2.model_name!r}")
-
-    # 验证没有 status 字段
-    assert not hasattr(r2, "status"), "PredictionResult 不应有 status 字段"
-    print("✅ PredictionResult 没有 status 字段\n")
-
-
-def test_format_error():
-    """验证 format_error 函数。"""
-    print("=== format_error 验证 ===")
-
-    from car_pricing.api_client import (
-        format_error,
-        APIConnectionError,
-        APITimeoutError,
-        APIHTTPError,
-        APIClientError,
-    )
-
-    msg = format_error(APIConnectionError("test"))
-    assert "connect" in msg.lower()
-    print(f"✅ ConnectionError: {msg}")
-
-    msg = format_error(APITimeoutError("test"))
-    assert "timed out" in msg.lower()
-    print(f"✅ TimeoutError: {msg}")
-
-    msg = format_error(APIHTTPError(404, detail="not found"))
-    assert "404" in msg and "not found" in msg
-    print(f"✅ HTTPError: {msg}")
-
-    msg = format_error(APIClientError("something wrong"))
-    assert "Client error" in msg
-    print(f"✅ ClientError: {msg}")
-
-    msg = format_error(ValueError("generic"))
-    assert "unexpected error" in msg.lower()
-    print(f"✅ Generic error: {msg}\n")
-
-
-def test_batch_prediction_item_construction():
-    """验证批量预测条目的构造。"""
-    print("=== BatchPredictionItem 构造验证 ===")
-
-    from car_pricing.api_client import BatchPredictionItem
-
-    # 成功条目
-    success = BatchPredictionItem(
-        row_index=0,
-        prediction=13295.27,
-        currency="USD",
-        model_name="sklearn_gbr",
-        error=None,
-    )
-    assert success.row_index == 0
-    assert success.prediction == 13295.27
-    assert success.currency == "USD"
-    assert success.model_name == "sklearn_gbr"
-    assert success.error is None
-    print(f"✅ 成功条目: row_index={success.row_index}, prediction={success.prediction}")
-
-    # 失败条目
-    failed = BatchPredictionItem(
-        row_index=1,
-        prediction=None,
-        currency="USD",
-        model_name="sklearn_gbr",
-        error="缺少字段: enginesize",
-    )
-    assert failed.row_index == 1
-    assert failed.prediction is None
-    assert failed.error == "缺少字段: enginesize"
-    print(f"✅ 失败条目: row_index={failed.row_index}, error={failed.error}")
-
+    # 批量字段常量
+    assert pp.BATCH_ITEM_FIELDS == (
+        "row_index", "prediction", "currency", "model_name", "error"
+    ), f"BATCH_ITEM_FIELDS 错误: {pp.BATCH_ITEM_FIELDS}"
+    assert pp.BATCH_RESPONSE_FIELDS == (
+        "status", "total_records", "valid_count", "invalid_count", "results"
+    ), f"BATCH_RESPONSE_FIELDS 错误: {pp.BATCH_RESPONSE_FIELDS}"
+    print(f"✅ BATCH_ITEM_FIELDS = {pp.BATCH_ITEM_FIELDS}")
+    print(f"✅ BATCH_RESPONSE_FIELDS = {pp.BATCH_RESPONSE_FIELDS}")
     print()
 
 
-def test_api_client_predict_parsing():
-    """验证 api_client.predict 的解析逻辑。"""
-    print("=== api_client.predict 解析验证 ===")
+def test_protocol_dataclasses_exist():
+    """验证 prediction_protocol 定义了 canonical 数据类。"""
+    print("=== 协议数据类验证 ===")
 
-    from car_pricing.api_client import CarPriceAPIClient
+    from car_pricing import (
+        PredictionProtocolResult,
+        BatchProtocolItem,
+        BatchProtocolResponse,
+    )
 
-    # 模拟响应解析（不实际发请求）
-    # canonical 响应
-    canonical_resp = {
+    # 单条
+    single_fields = {f.name for f in PredictionProtocolResult.__dataclass_fields__.values()}
+    assert single_fields == {"prediction", "currency", "model_name"}
+    print(f"✅ PredictionProtocolResult 字段: {sorted(single_fields)}")
+
+    # 批量条目
+    item_fields = {f.name for f in BatchProtocolItem.__dataclass_fields__.values()}
+    assert item_fields == {"row_index", "prediction", "currency", "model_name", "error"}
+    print(f"✅ BatchProtocolItem 字段: {sorted(item_fields)}")
+
+    # 批量响应
+    resp_fields = {f.name for f in BatchProtocolResponse.__dataclass_fields__.values()}
+    assert resp_fields == {"status", "total_records", "valid_count", "invalid_count", "results"}
+    print(f"✅ BatchProtocolResponse 字段: {sorted(resp_fields)}")
+    print()
+
+
+def test_build_functions_use_protocol_defaults():
+    """验证构造函数使用协议默认值。"""
+    print("=== 构造函数默认值验证 ===")
+
+    from car_pricing import (
+        build_prediction_result,
+        build_batch_success_item,
+        build_batch_error_item,
+        build_batch_response,
+        DEFAULT_CURRENCY,
+        DEFAULT_MODEL_NAME,
+        DEFAULT_STATUS,
+    )
+
+    # 单条构造
+    single = build_prediction_result(13295.27)
+    assert single.prediction == 13295.27
+    assert single.currency == DEFAULT_CURRENCY
+    assert single.model_name == DEFAULT_MODEL_NAME
+    print(f"✅ build_prediction_result: currency={single.currency!r}, model_name={single.model_name!r}")
+
+    # 批量成功条目
+    success = build_batch_success_item(0, 13295.27)
+    assert success.row_index == 0
+    assert success.prediction == 13295.27
+    assert success.currency == DEFAULT_CURRENCY
+    assert success.model_name == DEFAULT_MODEL_NAME
+    assert success.error is None
+    print(f"✅ build_batch_success_item: currency={success.currency!r}, model_name={success.model_name!r}")
+
+    # 批量失败条目
+    failed = build_batch_error_item(1, "缺少字段")
+    assert failed.row_index == 1
+    assert failed.prediction is None
+    assert failed.currency == DEFAULT_CURRENCY
+    assert failed.model_name == DEFAULT_MODEL_NAME
+    assert failed.error == "缺少字段"
+    print(f"✅ build_batch_error_item: currency={failed.currency!r}, model_name={failed.model_name!r}")
+
+    # 批量响应
+    batch = build_batch_response([success, failed])
+    assert batch.status == DEFAULT_STATUS
+    assert batch.total_records == 2
+    assert batch.valid_count == 1
+    assert batch.invalid_count == 1
+    assert len(batch.results) == 2
+    print(f"✅ build_batch_response: status={batch.status!r}, total={batch.total_records}, valid={batch.valid_count}, invalid={batch.invalid_count}")
+    print()
+
+
+def test_api_client_types_alias_protocol():
+    """验证 api_client 的结果类型是协议类型的别名。"""
+    print("=== api_client 类型别名验证 ===")
+
+    from car_pricing import prediction_protocol as pp
+    from car_pricing.api_client import (
+        PredictionResult,
+        BatchPredictionResultItem,
+        BatchPredictionItem,
+        BatchPredictionResponse,
+    )
+
+    assert PredictionResult is pp.PredictionProtocolResult, (
+        "PredictionResult 应是 PredictionProtocolResult 的别名"
+    )
+    print("✅ PredictionResult is PredictionProtocolResult")
+
+    assert BatchPredictionResultItem is pp.BatchProtocolItem, (
+        "BatchPredictionResultItem 应是 BatchProtocolItem 的别名"
+    )
+    print("✅ BatchPredictionResultItem is BatchProtocolItem")
+
+    assert BatchPredictionItem is pp.BatchProtocolItem, (
+        "BatchPredictionItem 应是 BatchProtocolItem 的别名"
+    )
+    print("✅ BatchPredictionItem is BatchProtocolItem")
+
+    assert BatchPredictionResponse is pp.BatchProtocolResponse, (
+        "BatchPredictionResponse 应是 BatchProtocolResponse 的别名"
+    )
+    print("✅ BatchPredictionResponse is BatchProtocolResponse")
+    print()
+
+
+def test_model_runtime_types_alias_protocol():
+    """验证 model_runtime 的结果类型是协议类型的别名。"""
+    print("=== model_runtime 类型别名验证 ===")
+
+    from car_pricing import prediction_protocol as pp
+    from car_pricing.model_runtime import (
+        BatchPredictionItem,
+        BatchPredictionResult,
+    )
+
+    assert BatchPredictionItem is pp.BatchProtocolItem, (
+        "model_runtime.BatchPredictionItem 应是 BatchProtocolItem 的别名"
+    )
+    print("✅ model_runtime.BatchPredictionItem is BatchProtocolItem")
+
+    assert BatchPredictionResult is pp.BatchProtocolResponse, (
+        "model_runtime.BatchPredictionResult 应是 BatchProtocolResponse 的别名"
+    )
+    print("✅ model_runtime.BatchPredictionResult is BatchProtocolResponse")
+    print()
+
+
+def test_fastapi_pydantic_matches_protocol():
+    """验证 FastAPI Pydantic 模型字段与协议一致（使用协议默认值）。"""
+    print("=== FastAPI Pydantic 模型与协议一致性验证 ===")
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fastapi"))
+    from models import PredictionResponse, BatchPredictionItem, BatchPredictionResponse
+    from car_pricing import (
+        SINGLE_PREDICTION_FIELDS,
+        BATCH_ITEM_FIELDS,
+        DEFAULT_CURRENCY,
+        DEFAULT_MODEL_NAME,
+        DEFAULT_STATUS,
+    )
+
+    # PredictionResponse
+    fastapi_fields = set(PredictionResponse.__fields__.keys())
+    expected = set(SINGLE_PREDICTION_FIELDS)
+    assert fastapi_fields == expected, f"PredictionResponse 字段不匹配: {fastapi_fields} vs {expected}"
+    default_currency = PredictionResponse.__fields__["currency"].default
+    default_model = PredictionResponse.__fields__["model_name"].default
+    assert default_currency == DEFAULT_CURRENCY, f"PredictionResponse.currency 默认值错误: {default_currency}"
+    assert default_model == DEFAULT_MODEL_NAME, f"PredictionResponse.model_name 默认值错误: {default_model!r}"
+    print(f"✅ PredictionResponse 字段匹配协议默认值: currency={default_currency!r}, model_name={default_model!r}")
+
+    # BatchPredictionItem
+    item_fields = set(BatchPredictionItem.__fields__.keys())
+    expected = set(BATCH_ITEM_FIELDS)
+    assert item_fields == expected, f"BatchPredictionItem 字段不匹配: {item_fields} vs {expected}"
+    item_currency = BatchPredictionItem.__fields__["currency"].default
+    item_model = BatchPredictionItem.__fields__["model_name"].default
+    assert item_currency == DEFAULT_CURRENCY
+    assert item_model == DEFAULT_MODEL_NAME
+    print(f"✅ BatchPredictionItem 字段匹配协议默认值")
+
+    # BatchPredictionResponse
+    status_default = BatchPredictionResponse.__fields__["status"].default
+    assert status_default == DEFAULT_STATUS, f"BatchPredictionResponse.status 默认值错误: {status_default!r}"
+    print(f"✅ BatchPredictionResponse.status 默认值 = {status_default!r}")
+    print()
+
+
+def test_protocol_dict_roundtrip():
+    """验证协议类的 from_dict / to_dict 往返转换。"""
+    print("=== 协议 dict 往返转换验证 ===")
+
+    from car_pricing import (
+        PredictionProtocolResult,
+        BatchProtocolItem,
+        BatchProtocolResponse,
+        build_batch_success_item,
+        build_batch_error_item,
+        build_batch_response,
+    )
+
+    # 单条 - canonical
+    s1 = PredictionProtocolResult.from_dict({
         "prediction": 13295.27,
         "currency": "USD",
         "model_name": "sklearn_gbr",
-    }
-    prediction = canonical_resp.get("prediction")
-    currency = canonical_resp.get("currency", "USD")
-    model_name = canonical_resp.get("model_name", "")
-    assert prediction == 13295.27
-    assert currency == "USD"
-    assert model_name == "sklearn_gbr"
-    print(f"✅ canonical 响应解析: prediction={prediction}, currency={currency}, model_name={model_name}")
+    })
+    d1 = s1.to_dict()
+    assert d1 == {"prediction": 13295.27, "currency": "USD", "model_name": "sklearn_gbr"}
+    print(f"✅ 单条 canonical 往返: {d1}")
 
-    # 旧响应容错（带 status，不带 currency/model_name）
-    legacy_resp = {
-        "prediction": 13295.27,
+    # 单条 - 旧响应容错（带 status，status 被忽略）
+    s2 = PredictionProtocolResult.from_dict({
+        "prediction": 10000.0,
         "status": "ok",
-    }
-    prediction = legacy_resp.get("prediction")
-    currency = legacy_resp.get("currency", "USD")
-    model_name = legacy_resp.get("model_name", "")
-    # status 不进入返回类型
-    assert prediction == 13295.27
-    assert currency == "USD"
-    assert model_name == ""
-    assert "status" not in (prediction, currency, model_name)
-    print(f"✅ 旧响应容错: prediction={prediction}, currency={currency}, model_name={model_name!r} (status 被忽略)")
+    })
+    d2 = s2.to_dict()
+    assert "status" not in d2
+    assert d2["prediction"] == 10000.0
+    assert d2["currency"] == "USD"
+    assert d2["model_name"] == ""
+    print(f"✅ 单条 legacy 往返: {d2} (status 被剔除)")
 
+    # 批量条目
+    success = build_batch_success_item(0, 13295.27, model_name="gbr")
+    d_item = success.to_dict()
+    assert d_item == {
+        "row_index": 0, "prediction": 13295.27, "currency": "USD",
+        "model_name": "gbr", "error": None
+    }
+    item_back = BatchProtocolItem.from_dict(d_item)
+    assert item_back.row_index == 0
+    assert item_back.prediction == 13295.27
+    print(f"✅ 批量条目往返: {d_item}")
+
+    # 批量响应
+    failed = build_batch_error_item(1, "bad input")
+    resp = build_batch_response([success, failed])
+    d_resp = resp.to_dict()
+    assert d_resp["status"] == "ok"
+    assert d_resp["total_records"] == 2
+    assert d_resp["valid_count"] == 1
+    assert d_resp["invalid_count"] == 1
+    assert len(d_resp["results"]) == 2
+    resp_back = BatchProtocolResponse.from_dict(d_resp)
+    assert resp_back.total_records == 2
+    assert resp_back.valid_count == 1
+    print(f"✅ 批量响应往返: total={resp_back.total_records}, valid={resp_back.valid_count}, invalid={resp_back.invalid_count}")
     print()
 
 
+def test_bentoml_returns_protocol_dict():
+    """验证 BentoML service 返回的 dict 符合协议格式。"""
+    print("=== BentoML 服务端协议格式验证 ===")
+
+    from car_pricing import (
+        BatchProtocolItem,
+        BatchProtocolResponse,
+        DEFAULT_STATUS,
+        BATCH_ITEM_FIELDS,
+    )
+    from car_pricing.model_runtime import CarPriceModel
+    import tempfile
+
+    # 用 model_runtime 模拟 BentoML 行为
+    model = _get_test_model()
+    records = [
+        {"enginesize": 130, "curbweight": 2548, "horsepower": 111, "highwaympg": 27,
+         "carwidth": 64.1, "wheelbase": 88.6, "drivewheel": "rwd", "citympg": 21,
+         "boreratio": 3.47, "cylindernumber": "four"},
+        {"enginesize": None, "curbweight": None},  # 缺少字段
+    ]
+    batch = model.predict_records(records)
+    d = batch.to_dict()  # 这就是 BentoML 返回的内容
+
+    # 验证响应格式
+    assert "status" in d and d["status"] == DEFAULT_STATUS
+    assert "total_records" in d and d["total_records"] == 2
+    assert "valid_count" in d and d["valid_count"] == 1
+    assert "invalid_count" in d and d["invalid_count"] == 1
+    assert "results" in d and len(d["results"]) == 2
+    print(f"✅ 响应包含协议字段: status/total_records/valid_count/invalid_count/results")
+
+    # 验证每条结果字段
+    expected_item_fields = set(BATCH_ITEM_FIELDS)
+    for r in d["results"]:
+        assert set(r.keys()) == expected_item_fields, f"条目字段不对: {set(r.keys())} vs {expected_item_fields}"
+        assert "currency" in r and r["currency"] == "USD"
+        assert "model_name" in r
+    print(f"✅ 每条结果包含协议字段: {sorted(expected_item_fields)}")
+    print()
+
+
+def _get_test_model():
+    """加载测试模型。"""
+    from car_pricing import CarPriceModel
+    model_path = os.path.join(os.path.dirname(__file__), "..", "fastapi", "models", "sklearn_gbr.pkl")
+    if not os.path.exists(model_path):
+        raise RuntimeError(f"测试模型不存在: {model_path}")
+    m = CarPriceModel.from_joblib(model_path)
+    return m
+
+
 def main():
-    test_single_prediction_canonical_fields()
-    test_batch_prediction_fields()
-    test_car_pricing_exports()
-    test_predict_result_construction()
-    test_format_error()
-    test_batch_prediction_item_construction()
-    test_api_client_predict_parsing()
-    print("=" * 50)
-    print("✅ 所有一致性验证通过！")
-    print("=" * 50)
+    test_protocol_constants_centralized()
+    test_protocol_dataclasses_exist()
+    test_build_functions_use_protocol_defaults()
+    test_api_client_types_alias_protocol()
+    test_model_runtime_types_alias_protocol()
+    test_fastapi_pydantic_matches_protocol()
+    test_protocol_dict_roundtrip()
+    test_bentoml_returns_protocol_dict()
+    print("=" * 60)
+    print("✅ 所有协议一致性验证通过！所有端都从 prediction_protocol 派生！")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

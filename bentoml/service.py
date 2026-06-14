@@ -13,10 +13,16 @@ import json
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.prediction_protocol import (
+    DEFAULT_CURRENCY,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_STATUS,
+    build_prediction_result,
+)
 
 
-MODEL_NAME = "sklearn_gbr"
-MODEL_CURRENCY = "USD"
+MODEL_NAME = DEFAULT_MODEL_NAME or "sklearn_gbr"
+MODEL_CURRENCY = DEFAULT_CURRENCY
 
 predictor = bentoml.sklearn.load_runner("gbr:latest")
 
@@ -63,23 +69,8 @@ def predict_batch(input_json) -> dict:
 
     batch_result = model.predict_records(records)
 
-    results = []
-    for item in batch_result.results:
-        results.append({
-            "row_index": item.row_index,
-            "prediction": item.prediction,
-            "currency": MODEL_CURRENCY,
-            "model_name": MODEL_NAME,
-            "error": item.error,
-        })
-
-    return {
-        "status": "ok",
-        "total_records": batch_result.total_records,
-        "valid_count": batch_result.valid_count,
-        "invalid_count": batch_result.invalid_count,
-        "results": results,
-    }
+    # model_runtime 里 DEFAULT_CURRENCY/DEFAULT_MODEL_NAME 已经被填充，这里直接 to_dict
+    return batch_result.to_dict()
 
 
 @service.api(input=JSON(), output=JSON())

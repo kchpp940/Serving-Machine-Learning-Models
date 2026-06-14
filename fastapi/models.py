@@ -8,6 +8,14 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.prediction_protocol import (
+    DEFAULT_CURRENCY,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_STATUS,
+    SINGLE_PREDICTION_FIELDS,
+    BATCH_ITEM_FIELDS,
+    BATCH_RESPONSE_FIELDS,
+)
 
 
 class CarPrediction(BaseModel):
@@ -41,14 +49,14 @@ class CarPrediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     prediction: float
-    currency: str = "USD"
-    model_name: str = ""
+    currency: str = DEFAULT_CURRENCY
+    model_name: str = DEFAULT_MODEL_NAME
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "currency": "USD",
+                "currency": DEFAULT_CURRENCY,
                 "model_name": "sklearn_gbr",
             }
         }
@@ -93,13 +101,13 @@ class BatchPredictionRequest(BaseModel):
 class BatchPredictionItem(BaseModel):
     row_index: int
     prediction: Optional[float] = None
-    currency: str = "USD"
-    model_name: str
+    currency: str = DEFAULT_CURRENCY
+    model_name: str = DEFAULT_MODEL_NAME
     error: Optional[str] = None
 
 
 class BatchPredictionResponse(BaseModel):
-    status: str = "ok"
+    status: str = DEFAULT_STATUS
     total_records: int
     valid_count: int
     invalid_count: int
@@ -108,7 +116,7 @@ class BatchPredictionResponse(BaseModel):
     class Config:
         schema_extra = {
             "example": {
-                "status": "ok",
+                "status": DEFAULT_STATUS,
                 "total_records": 2,
                 "valid_count": 2,
                 "invalid_count": 0,
@@ -116,14 +124,14 @@ class BatchPredictionResponse(BaseModel):
                     {
                         "row_index": 0,
                         "prediction": 13295.27,
-                        "currency": "USD",
+                        "currency": DEFAULT_CURRENCY,
                         "model_name": "sklearn_gbr",
                         "error": None,
                     },
                     {
                         "row_index": 1,
                         "prediction": 18945.63,
-                        "currency": "USD",
+                        "currency": DEFAULT_CURRENCY,
                         "model_name": "sklearn_gbr",
                         "error": None,
                     },
