@@ -24,14 +24,13 @@ app = FastAPI(
 
 ## Response Protocol
 
-All responses follow a consistent JSON format:
-
-### Success Response (200 OK)
+### Prediction Success Response (200 OK)
+Model semantic fields only — no transport-level status envelope:
 ```json
 {
   "prediction": 13295.27,
-  "status": "success",
-  "message": "Prediction completed successfully"
+  "currency": "USD",
+  "model_name": "sklearn_gbr"
 }
 ```
 
@@ -173,8 +172,8 @@ def predict(data: CarPrediction):
         value = float(predictions[0])
         return PredictionResponse(
             prediction=value,
-            status="success",
-            message="Prediction completed successfully",
+            currency="USD",
+            model_name="sklearn_gbr",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

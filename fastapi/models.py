@@ -40,15 +40,15 @@ class CarPrediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     prediction: float
-    status: str = "success"
-    message: Optional[str] = None
+    currency: str = "USD"
+    model_name: str = "sklearn_gbr"
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "status": "success",
-                "message": "Prediction completed successfully",
+                "currency": "USD",
+                "model_name": "sklearn_gbr",
             }
         }
 

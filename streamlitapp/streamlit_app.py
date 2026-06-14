@@ -207,20 +207,12 @@ def main():
                 res.raise_for_status()
                 body = res.json()
 
-                if body.get("status") == "error":
-                    error_type = body.get("error", "UnknownError")
-                    detail = body.get("detail", "No details available")
-                    st.error(f"Server Error [{error_type}]: {detail}")
-                    return
-
                 prediction = body.get("prediction")
                 if prediction is None:
                     st.error(f"Unexpected response format from server. Missing 'prediction' field. Response: {body}")
                 else:
-                    st.success(f"The Price of the {names} is **{prediction:.2f}$**")
-                    message = body.get("message")
-                    if message:
-                        st.caption(message)
+                    currency = body.get("currency", "USD")
+                    st.success(f"The Price of the {names} is **{prediction:.2f} {currency}**")
 
             except re.exceptions.ConnectionError:
                 st.error("❌ **Connection Failed**\n\nUnable to connect to the prediction service. Please check:\n1. The API URL is correct\n2. The API server is running\n3. Your network connection")

@@ -385,19 +385,13 @@ class MainApp(MDApp):
                 resp.raise_for_status()
                 body = resp.json()
 
-                if body.get("status") == "error":
-                    error_type = body.get("error", "UnknownError")
-                    detail = body.get("detail", "No details available")
-                    output.text = f"Error [{error_type}]: {detail}"
-                    output.text_color = 1, 0, 0, 1
-                    return
-
                 prediction = body.get("prediction")
                 if prediction is None:
                     output.text = "Error: Server response missing 'prediction' field"
                     output.text_color = 1, 0, 0, 1
                 else:
-                    output.text = f"Predicted Price: ${prediction:.2f}"
+                    currency = body.get("currency", "USD")
+                    output.text = f"Predicted Price: {prediction:.2f} {currency}"
                     output.text_color = 0, 0.8, 0, 1
 
             except ValueError as e:

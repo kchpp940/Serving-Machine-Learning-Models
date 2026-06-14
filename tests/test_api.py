@@ -90,11 +90,13 @@ class TestPredictEndpoint:
 
         data = response.json()
 
-        assert "status" in data
-        assert data["status"] == "success"
         assert "prediction" in data
         assert isinstance(data["prediction"], float)
         assert data["prediction"] > 0
+        assert "currency" in data
+        assert isinstance(data["currency"], str)
+        assert "model_name" in data
+        assert isinstance(data["model_name"], str)
 
     def test_predict_response_matches_schema(self):
         test_data = {
@@ -198,14 +200,7 @@ class TestPredictEndpoint:
 
 
 class TestResponseProtocolConsistency:
-    def test_all_endpoints_use_consistent_status_field(self):
-        health_resp = client.get("/health")
-        health_data = health_resp.json()
-        assert "status" in health_data
-
-        schema_resp = client.get("/schema")
-        schema_data = schema_resp.json()
-
+    def test_predict_success_has_model_semantic_fields_only(self):
         test_data = {
             "enginesize": 130,
             "curbweight": 2548,
@@ -220,8 +215,27 @@ class TestResponseProtocolConsistency:
         }
         predict_resp = client.post("/predict", json=test_data)
         predict_data = predict_resp.json()
-        assert "status" in predict_data
-        assert predict_data["status"] == "success"
+
+        assert "prediction" in predict_data
+        assert "currency" in predict_data
+        assert "model_name" in predict_data
+        assert "status" not in predict_data, "Success response must not carry transport-level status field"
+        assert "message" not in predict_data, "Success response must not carry message field"
+
+    def test_error_response_has_consistent_status_envelope(self):
+        resp = client.post("/predict", json={"enginesize": 130})
+        err_data = resp.json()
+        assert err_data["status"] == "error"
+        assert "error" in err_data
+        assert "detail" in err_data
+
+    def test_health_response_has_consistent_status(self):
+        health_resp = client.get("/health")
+        health_data = health_resp.json()
+        assert health_data["status"] == "ok"
+        assert "service" in health_data
+        assert "version" in health_data
+        assert "model_loaded" in health_data
 
     def test_prediction_field_is_numeric(self):
         test_data = {
