@@ -1,14 +1,10 @@
-import os
-import sys
+from car_pricing import (
+    CarPriceModel,
+    get_model_path,
+    load_model,
+)
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_HERE)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
-from model_runtime import CarPriceModel  # noqa: E402
-
-MODEL_BUNDLE_PATH = os.path.join(_HERE, "models", "sklearn_gbr.pkl")
+MODEL_BUNDLE_PATH = str(get_model_path("flaskapp"))
 
 _MODEL_SINGLETON: CarPriceModel | None = None
 
@@ -17,7 +13,7 @@ def get_model() -> CarPriceModel:
     """返回全局单例的 CarPriceModel 适配器（兼容 bundle / 旧裸模型）。"""
     global _MODEL_SINGLETON
     if _MODEL_SINGLETON is None:
-        _MODEL_SINGLETON = CarPriceModel.from_joblib(MODEL_BUNDLE_PATH)
+        _MODEL_SINGLETON = load_model("flaskapp")
     return _MODEL_SINGLETON
 
 

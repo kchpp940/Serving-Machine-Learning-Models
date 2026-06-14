@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 import utils
-from model_bundle_loader import get_bundle
+from model_bundle_loader import get_bundle, get_model, MODEL_BUNDLE_PATH
+from car_pricing import build_model_info, ErrorMessages
 
 app = Flask(__name__)
 
@@ -24,7 +25,7 @@ def _parse_form() -> tuple[dict, dict, dict]:
         raw_value = form_data.get(field_name, "").strip()
 
         if not raw_value:
-            errors[field_name] = f"{label} cannot be empty."
+            errors[field_name] = ErrorMessages.FIELD_EMPTY.format(field=label)
             continue
 
         try:
@@ -51,6 +52,13 @@ def home():
     return render_template("index.html", **_template_context())
 
 
+@app.route("/model_info")
+def model_info():
+    model = get_model()
+    info = build_model_info(model, MODEL_BUNDLE_PATH)
+    return jsonify(info.to_dict())
+
+
 @app.route("/predict", methods=["GET", "POST"])
 def predict():
     if request.method == "POST":
@@ -71,7 +79,7 @@ def predict():
                 result=f"The Price of the {car_name} is: {value}$",
             )
         except Exception as e:
-            errors["_general"] = f"Prediction failed: {str(e)}"
+            errors["_general"] = ErrorMessages.PREDICTION_FAILED.format(error=str(e))
             return render_template(
                 "index.html",
                 **_template_context({"errors": errors, "form_data": form_data}),

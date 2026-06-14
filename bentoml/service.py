@@ -1,29 +1,17 @@
-import os
-import sys
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_HERE)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
 import numpy as np
 import pandas as pd
-from typing import Any
 
 import bentoml
 from bentoml.io import NumpyNdarray, PandasDataFrame, JSON
 from pydantic import BaseModel
 
-from model_runtime import CarPriceModel, _is_bundle
+from car_pricing import CarPriceModel, _is_bundle
 
 
 BENTOML_MODEL_TAG = "gbr_bundle:latest"
 BENTOML_LEGACY_TAG = "gbr:latest"
 
 # ============================================================
-# 1. 旧版 gbr tag 只存了 sklearn 对象 → 用 load_runner 跑；
-# 2. 新版 gbr_bundle tag 存的是 dict bundle → 取 raw 交给 CarPriceModel。
-#
 # 为了同时兼容两种 BentoML 存储格式，我们不在 runner 层 decode，
 # 而是在 service 层处理：
 #   - PandasDataFrame / JSON 输入 → 交给 CarPriceModel 编码 + 预测
@@ -60,8 +48,6 @@ try:
         raise RuntimeError("BentoML 无可用模型")
 
     if _is_bundle(_raw_obj):
-        # 新版：BentoML 里存了 bundle dict，但 runner 只能跑带 predict 的对象
-        # 所以把真正的 sklearn model 拿出来当 runner 用
         _sklearn_model = _raw_obj["model"]
     else:
         _sklearn_model = _raw_obj
@@ -71,7 +57,7 @@ try:
         _sklearn_model,
     ).to_runner()
     predictor_runner = predictor
-except Exception as exc:  # pragma: no cover - 开发环境不一定有 bentoml 模型
+except Exception as exc:
     predictor_runner = None
     print(f"[BentoML] runner 未加载（{exc}），service 层将使用 CarPriceModel 独立推理")
 

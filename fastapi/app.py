@@ -1,16 +1,15 @@
-import os
-import sys
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_HERE)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse, FileResponse
 from pydantic import BaseModel
 
-from model_runtime import CarPriceModel
+from car_pricing import (
+    CarPriceModel,
+    get_model_path,
+    load_model,
+    build_model_info,
+    ErrorMessages,
+    resolve_relative_path,
+)
 from models import CarPrediction
 
 app = FastAPI(
@@ -27,23 +26,24 @@ Supports two model file formats under `./models/sklearn_gbr.pkl`:
     debug=True,
 )
 
-_MODEL_PATH = os.path.join(_HERE, "models", "sklearn_gbr.pkl")
 _model: CarPriceModel | None = None
 
 
 def _get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        _model = CarPriceModel.from_joblib(_MODEL_PATH)
+        _model = load_model("fastapi")
     return _model
 
 
 @app.on_event("startup")
 def _startup_load_model():
     global _model
-    _model = CarPriceModel.from_joblib(_MODEL_PATH)
+    _model = load_model("fastapi")
+    path = get_model_path("fastapi")
     print(
-        f"[FastAPI] 模型加载完成: mode={_model.mode}, n_features={len(_model.feature_order)}, "
+        f"[FastAPI] 模型加载完成: path={path}, mode={_model.mode}, "
+        f"n_features={len(_model.feature_order)}, "
         f"categorical_cols={list(_model.categorical_encoders.keys())}"
     )
 
@@ -57,7 +57,7 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
     return note
 
 
-favicon_path = os.path.join(_HERE, "favicon.png")
+favicon_path = resolve_relative_path("fastapi/favicon.png")
 
 
 @app.get("/favicon.png", include_in_schema=False)
@@ -65,23 +65,11 @@ async def favicon():
     return FileResponse(favicon_path)
 
 
-class ModelInfoResponse(BaseModel):
-    mode: str
-    feature_order: list
-    categorical_features: list
-    categorical_options: dict
-
-
 @app.get("/model_info")
-async def model_info() -> ModelInfoResponse:
+async def model_info():
     m = _get_model()
-    options = {col: m.categorical_options(col) for col in m.categorical_features}
-    return ModelInfoResponse(
-        mode=m.mode,
-        feature_order=list(m.feature_order),
-        categorical_features=list(m.categorical_features),
-        categorical_options=options,
-    )
+    info = build_model_info(m, get_model_path("fastapi"))
+    return info.to_dict()
 
 
 @app.post("/predict")
@@ -94,6 +82,17 @@ def predict(data: CarPrediction):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=f"Model file missing: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorMessages.MODEL_MISSING.format(path=get_model_path("fastapi")),
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorMessages.MODEL_LOAD_FAILED.format(error=str(e)),
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=ErrorMessages.PREDICTION_FAILED.format(error=str(e)),
+        )
