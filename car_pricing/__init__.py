@@ -26,6 +26,13 @@ from car_pricing.feature_schema import (
     pydantic_field_names,
     build_car_prediction_model,
     interface_fields_from_model,
+    SUPPORTED_PYDANTIC_MAJORS,
+    SUPPORTED_FASTAPI_VERSIONS,
+    check_dependency_versions,
+    pydantic_model_schema,
+    self_check_pydantic_model,
+    run_startup_self_check,
+    DependencyVersionWarning,
 )
 
 from car_pricing.model_runtime import CarPriceModel
@@ -58,5 +65,12 @@ __all__ = [
     "pydantic_field_names",
     "build_car_prediction_model",
     "interface_fields_from_model",
+    "SUPPORTED_PYDANTIC_MAJORS",
+    "SUPPORTED_FASTAPI_VERSIONS",
+    "check_dependency_versions",
+    "pydantic_model_schema",
+    "self_check_pydantic_model",
+    "run_startup_self_check",
+    "DependencyVersionWarning",
     "CarPriceModel",
 ]

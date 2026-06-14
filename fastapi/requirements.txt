@@ -1,8 +1,19 @@
-fastapi[all]
-joblib==1.1.0
-numpy==1.19.5
-pandas==1.4.3
-pydantic==1.9.1
-scikit_learn==1.1.1
-gunicorn
+# ===== Car Price Prediction API - 依赖版本矩阵 =====
+#
+# 支持的 Pydantic / FastAPI 版本组合：
+#   - Pydantic v1 (1.8 ~ 1.x) + FastAPI 0.65.0 ~ 0.100.0
+#   - Pydantic v2 (2.0 ~ 2.x) + FastAPI >= 0.100.0
+#
+# 启动时会执行 run_startup_self_check()，若版本组合不在支持范围，
+# 严格模式 (STRICT_SELF_CHECK=True) 下服务拒绝启动。
+# ====================================================
 
+joblib>=1.1.0,<2.0
+numpy>=1.21,<2.0
+pandas>=1.3,<3.0
+scikit-learn>=1.0,<2.0
+uvicorn>=0.17.0,<0.33
+fastapi>=0.74.0,<0.116
+
+# 默认 Pydantic v2（与当前 fastapi>=0.100 匹配）
+pydantic>=1.9,<3.0

@@ -631,3 +631,219 @@ def build_car_prediction_model(
 def interface_fields_from_model(model_cls) -> List[str]:
     """从 Pydantic 模型提取接口字段列表，保证三端校验使用同一份字段定义。"""
     return pydantic_field_names(model_cls)
+
+
+# -----------------------------
+# 支持版本矩阵 & 启动自检
+# -----------------------------
+
+SUPPORTED_PYDANTIC_MAJORS = {1, 2}
+
+SUPPORTED_FASTAPI_VERSIONS = {
+    1: {  # Pydantic v1 对应 FastAPI 版本范围
+        "min": "0.65.0",
+        "max": "0.100.0",
+    },
+    2: {  # Pydantic v2 对应 FastAPI 版本范围
+        "min": "0.100.0",
+        "max": None,
+    },
+}
+
+
+def _parse_version(ver_str: str) -> tuple:
+    return tuple(int(p) for p in ver_str.split(".")[:3])
+
+
+def _version_in_range(ver_str: str, min_ver: str | None, max_ver: str | None) -> bool:
+    ver = _parse_version(ver_str)
+    if min_ver is not None and ver < _parse_version(min_ver):
+        return False
+    if max_ver is not None and ver >= _parse_version(max_ver):
+        return False
+    return True
+
+
+def check_dependency_versions(
+    pydantic_version: str | None = None,
+    fastapi_version: str | None = None,
+) -> List[str]:
+    """检查当前环境的 Pydantic + FastAPI 版本是否在支持矩阵内。
+
+    返回错误/警告列表；空列表表示全部通过。
+    """
+    issues: List[str] = []
+
+    if pydantic_version is None:
+        if _pydantic is None:
+            issues.append("pydantic 未安装")
+            return issues
+        pydantic_version = _pydantic.VERSION
+
+    pydantic_major = int(pydantic_version.split(".")[0])
+    if pydantic_major not in SUPPORTED_PYDANTIC_MAJORS:
+        issues.append(
+            f"Pydantic {pydantic_version} 不在支持的主版本范围 "
+            f"{sorted(SUPPORTED_PYDANTIC_MAJORS)} 内"
+        )
+        return issues
+
+    if fastapi_version is None:
+        try:
+            import fastapi as _fastapi
+            fastapi_version = _fastapi.__version__
+        except ImportError:
+            issues.append("fastapi 未安装，无法做版本组合校验")
+            return issues
+
+    if pydantic_major in SUPPORTED_FASTAPI_VERSIONS:
+        spec = SUPPORTED_FASTAPI_VERSIONS[pydantic_major]
+        if not _version_in_range(fastapi_version, spec["min"], spec["max"]):
+            max_display = spec["max"] or "latest"
+            issues.append(
+                f"Pydantic v{pydantic_major} 推荐 FastAPI {spec['min']} ~ {max_display}, "
+                f"当前 FastAPI {fastapi_version} 可能存在兼容问题"
+            )
+
+    return issues
+
+
+class DependencyVersionWarning(Warning):
+    pass
+
+
+def pydantic_model_schema(model_cls) -> dict:
+    """跨 v1/v2 获取 Pydantic 模型的 JSON Schema。"""
+    if _PYDANTIC_MAJOR >= 2:
+        return model_cls.model_json_schema()
+    return model_cls.schema()
+
+
+def self_check_pydantic_model(
+    model_cls,
+    feature_order: List[str] = None,
+    categorical_features: List[str] = None,
+) -> List[str]:
+    """对动态生成的 Pydantic 请求模型做自检。
+
+    检查项：
+    1. 字段顺序和 feature_order 一致
+    2. 字段数量匹配
+    3. 分类字段是 str 类型，数值字段是 float 类型
+    4. example 字段数与 feature_order 一致
+    5. OpenAPI schema 中每个字段的 type 符合预期
+    """
+    issues: List[str] = []
+
+    if feature_order is None:
+        feature_order = list(FEATURE_ORDER)
+    if categorical_features is None:
+        categorical_features = list(CATEGORICAL_FEATURES)
+
+    cat_set = set(categorical_features)
+    num_set = set(feature_order) - cat_set
+
+    fields = pydantic_field_names(model_cls)
+    if fields != list(feature_order):
+        issues.append(
+            f"Pydantic 模型字段顺序 {fields} 与 feature_order {list(feature_order)} 不一致"
+        )
+
+    if len(fields) != len(feature_order):
+        issues.append(
+            f"Pydantic 模型字段数 {len(fields)} 与 schema 特征数 {len(feature_order)} 不一致"
+        )
+
+    annotations = model_cls.__annotations__
+    for name in feature_order:
+        if name not in annotations:
+            issues.append(f"Pydantic 模型缺少字段 {name}")
+            continue
+        expected = str if name in cat_set else float
+        actual = annotations[name]
+        if actual != expected:
+            issues.append(
+                f"字段 {name} 类型不一致: 期望 {expected.__name__}, 实际 {actual.__name__}"
+            )
+
+    schema = pydantic_model_schema(model_cls)
+    properties = schema.get("properties", {})
+    for name in feature_order:
+        if name not in properties:
+            issues.append(f"OpenAPI schema 缺少字段 {name}")
+            continue
+        prop = properties[name]
+        schema_type = prop.get("type", "")
+        if name in cat_set and schema_type != "string":
+            issues.append(
+                f"OpenAPI schema 中 {name} 类型应为 string, 实际 {schema_type}"
+            )
+        elif name in num_set and schema_type not in ("number", "integer"):
+            issues.append(
+                f"OpenAPI schema 中 {name} 类型应为 number, 实际 {schema_type}"
+            )
+
+    example = schema.get("example", {})
+    if isinstance(example, dict):
+        missing = set(feature_order) - set(example.keys())
+        if missing:
+            issues.append(f"OpenAPI schema example 缺少字段: {sorted(missing)}")
+
+    return issues
+
+
+def run_startup_self_check(
+    pydantic_model_cls=None,
+    feature_order: List[str] = None,
+    categorical_features: List[str] = None,
+    strict: bool = False,
+) -> dict:
+    """启动时执行的完整自检。
+
+    返回 {
+        "passed": bool,
+        "dependency_issues": [...],
+        "schema_issues": [...],
+        "pydantic_version": str,
+        "fastapi_version": str | None,
+        "feature_order": [...],
+    }
+    """
+    if feature_order is None:
+        feature_order = list(FEATURE_ORDER)
+
+    dep_issues: List[str] = []
+    schema_issues: List[str] = []
+
+    pydantic_ver = _pydantic.VERSION if _pydantic else "unknown"
+    fastapi_ver = None
+
+    try:
+        import fastapi as _fastapi
+        fastapi_ver = _fastapi.__version__
+    except ImportError:
+        pass
+
+    dep_issues = check_dependency_versions(
+        pydantic_version=pydantic_ver,
+        fastapi_version=fastapi_ver,
+    )
+
+    if pydantic_model_cls is not None:
+        schema_issues = self_check_pydantic_model(
+            pydantic_model_cls,
+            feature_order=feature_order,
+            categorical_features=categorical_features,
+        )
+
+    passed = len(dep_issues) == 0 and len(schema_issues) == 0
+
+    return {
+        "passed": passed,
+        "dependency_issues": dep_issues,
+        "schema_issues": schema_issues,
+        "pydantic_version": pydantic_ver,
+        "fastapi_version": fastapi_ver,
+        "feature_order": list(feature_order),
+        "strict": strict,
+    }
