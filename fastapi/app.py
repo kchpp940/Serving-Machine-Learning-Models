@@ -1,51 +1,52 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse, FileResponse
-from pydantic import BaseModel
+import sys
+import os
 
-from car_pricing import (
-    CarPriceModel,
-    get_model_path,
-    load_model,
-    build_model_info,
-    ErrorMessages,
-    resolve_relative_path,
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import pandas as pd
+import joblib
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi import HTTPException
 from models import CarPrediction
+import numpy as np
+
+from car_pricing.model_runtime import CarPriceModel
+from car_pricing.feature_schema import FEATURE_ORDER
+
 
 app = FastAPI(
     title="Car Price Prediction API",
-    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.
-
-Supports two model file formats under `./models/sklearn_gbr.pkl`:
-- **Bundle (recommended)**: dict with `model`, `feature_order`, `categorical_encoders`,
-  produced by the updated `train.py`.
-- **Legacy bare model**: the original GradientBoostingRegressor pickle, falls back to
-  the hard-coded 10-feature order and LabelEncoder alphabetical mapping.
-""",
-    version="1.0.0",
+    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.""",
+    version="0.0.1",
     debug=True,
 )
 
-_model: CarPriceModel | None = None
+_model: CarPriceModel = None
 
 
-def _get_model() -> CarPriceModel:
+def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        _model = load_model("fastapi")
+        model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
+        if not os.path.exists(model_path):
+            raise RuntimeError(f"模型文件不存在: {model_path}")
+        _model = CarPriceModel.from_joblib(model_path)
+        _model.schema.validate()
     return _model
 
 
 @app.on_event("startup")
-def _startup_load_model():
-    global _model
-    _model = load_model("fastapi")
-    path = get_model_path("fastapi")
-    print(
-        f"[FastAPI] 模型加载完成: path={path}, mode={_model.mode}, "
-        f"n_features={len(_model.feature_order)}, "
-        f"categorical_cols={list(_model.categorical_encoders.keys())}"
-    )
+async def startup_event():
+    try:
+        model = get_model()
+        print(f"Model loaded successfully. Mode: {model.mode}")
+        print(f"Feature order: {model.feature_order}")
+        print(f"Expected features: {model.schema.n_features()}")
+        print(f"Model n_features_in_: {model.model.n_features_in_}")
+    except Exception as e:
+        print(f"Failed to load model on startup: {e}")
+        raise
 
 
 @app.get("/", response_class=PlainTextResponse)
@@ -57,42 +58,37 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
     return note
 
 
-favicon_path = resolve_relative_path("fastapi/favicon.png")
+favicon_path = "favicon.png"
 
 
 @app.get("/favicon.png", include_in_schema=False)
 async def favicon():
+    from fastapi.responses import FileResponse
     return FileResponse(favicon_path)
 
 
-@app.get("/model_info")
-async def model_info():
-    m = _get_model()
-    info = build_model_info(m, get_model_path("fastapi"))
-    return info.to_dict()
+@app.get("/schema")
+async def get_schema():
+    model = get_model()
+    return {
+        "feature_order": model.feature_order,
+        "numeric_features": model.numeric_features,
+        "categorical_features": model.categorical_features,
+        "target_column": model.target_column,
+        "categorical_options": {
+            f: model.categorical_options(f) for f in model.categorical_features
+        },
+    }
 
 
 @app.post("/predict")
 def predict(data: CarPrediction):
     try:
-        model = _get_model()
+        model = get_model()
         predictions = model.predict_from_pydantic(data)
-        value = str(predictions)[1:-1]
-        return {"price": value}
+        value = float(predictions[0])
+        return {"predicted_price": value}
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorMessages.MODEL_MISSING.format(path=get_model_path("fastapi")),
-        )
-    except RuntimeError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorMessages.MODEL_LOAD_FAILED.format(error=str(e)),
-        )
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorMessages.PREDICTION_FAILED.format(error=str(e)),
-        )
+        raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
