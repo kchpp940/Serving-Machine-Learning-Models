@@ -145,7 +145,7 @@ class CarPriceModel:
         return self.schema.target_column
 
     def model_info(self) -> dict:
-        return {
+        info = {
             "mode": self.mode,
             "n_features_in_": getattr(self.model, "n_features_in_", None),
             "schema_n_features": self.schema.n_features(),
@@ -153,10 +153,35 @@ class CarPriceModel:
             "numeric_features": self.numeric_features,
             "categorical_features": self.categorical_features,
             "target_column": self.target_column,
-            "categorical_options": {
-                f: self.schema.categorical_options(f) for f in self.categorical_features
-            },
         }
+        info["schema"] = self.schema_export()
+        info["form_fields"] = self.form_fields_metadata()
+        info["input_spec"] = self.input_spec()
+        return info
+
+    def schema_export(self) -> dict:
+        return self.schema.schema_export()
+
+    def form_fields_metadata(self, extra_fields: list = None) -> list:
+        return self.schema.form_fields_metadata(extra_fields=extra_fields)
+
+    def input_spec(self) -> dict:
+        return self.schema.input_spec()
+
+    def default_example(self) -> dict:
+        return self.schema.default_example()
+
+    def field_label(self, field_name: str) -> str:
+        return self.schema.field_label(field_name)
+
+    def field_description(self, field_name: str) -> str:
+        return self.schema.field_description(field_name)
+
+    def field_allowed_values(self, field_name: str) -> list:
+        return self.schema.field_allowed_values(field_name)
+
+    def field_error_message(self, field_name: str, error_type: str) -> str:
+        return self.schema.field_error_message(field_name, error_type)
 
     def categorical_classes(self, field_name: str) -> list:
         return self.schema.categorical_classes(field_name)

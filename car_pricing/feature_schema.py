@@ -70,6 +70,57 @@ DRIVEWHEEL_DISPLAY: Dict[str, str] = {
     "rwd": "Rear Wheel Drive (RWD)",
 }
 
+FIELD_LABELS: Dict[str, str] = {
+    "names": "Car Name",
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway MPG",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheelbase",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City MPG",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders",
+}
+
+FIELD_DESCRIPTIONS: Dict[str, str] = {
+    "enginesize": "发动机排量 (立方英寸)",
+    "curbweight": "整备质量 (磅)",
+    "horsepower": "最大马力",
+    "highwaympg": "高速路百公里油耗换算 (MPG)",
+    "carwidth": "车身宽度 (英寸)",
+    "wheelbase": "轴距 (英寸)",
+    "drivewheel": "驱动轮类型: fwd/4wd/rwd",
+    "citympg": "城市百公里油耗换算 (MPG)",
+    "boreratio": "气缸内径与冲程比值",
+    "cylindernumber": "气缸数: two/four/six/eight 等",
+}
+
+FIELD_PLACEHOLDERS: Dict[str, str] = {
+    "enginesize": "e.g. 130",
+    "curbweight": "e.g. 2548",
+    "horsepower": "e.g. 111",
+    "highwaympg": "e.g. 27",
+    "carwidth": "e.g. 64.1",
+    "wheelbase": "e.g. 88.6",
+    "citympg": "e.g. 21",
+    "boreratio": "e.g. 3.47",
+}
+
+DEFAULT_EXAMPLE: Dict = {
+    "enginesize": 130,
+    "curbweight": 2548,
+    "horsepower": 111,
+    "highwaympg": 27,
+    "carwidth": 64.1,
+    "wheelbase": 88.6,
+    "drivewheel": "rwd",
+    "citympg": 21,
+    "boreratio": 3.47,
+    "cylindernumber": "four",
+}
+
 
 @dataclass
 class FeatureSchema:
@@ -252,6 +303,153 @@ class FeatureSchema:
                 f"服务接口字段与 schema 不一致 — {'; '.join(parts)}",
             )
 
+    def default_example(self) -> dict:
+        """返回合法的请求示例，字段顺序按 feature_order。"""
+        return {name: DEFAULT_EXAMPLE[name] for name in self.feature_order}
+
+    def field_label(self, field_name: str) -> str:
+        return FIELD_LABELS.get(field_name, field_name)
+
+    def field_description(self, field_name: str) -> str:
+        return FIELD_DESCRIPTIONS.get(field_name, "")
+
+    def field_type(self, field_name: str) -> str:
+        if field_name in self.numeric_features:
+            return "number"
+        if field_name in self.categorical_features:
+            return "string"
+        return "unknown"
+
+    def field_placeholder(self, field_name: str) -> str:
+        if field_name in self.numeric_features:
+            return FIELD_PLACEHOLDERS.get(
+                field_name,
+                f"e.g. {DEFAULT_EXAMPLE.get(field_name, '')}",
+            )
+        return ""
+
+    def field_allowed_values(self, field_name: str) -> list:
+        """返回字段合法输入值列表；数值字段返回空列表。"""
+        if field_name not in self.feature_order:
+            raise ValueError(f"未知字段: {field_name}")
+        if field_name in self.categorical_features:
+            return [str(c) for c in self.categorical_classes(field_name)]
+        return []
+
+    def field_error_message(self, field_name: str, error_type: str) -> str:
+        """统一错误提示模板。error_type: required/type/invalid."""
+        label = self.field_label(field_name)
+        if error_type == "required":
+            return f"{label} cannot be empty."
+        if error_type == "type":
+            if field_name in self.numeric_features:
+                return f"{label} must be a valid number (decimals allowed)."
+            return f"{label} must be a valid string."
+        if error_type == "invalid":
+            if field_name in self.categorical_features:
+                allowed = ", ".join(self.field_allowed_values(field_name))
+                return f"{label} must be one of: [{allowed}]"
+            return f"{label} contains an invalid value."
+        return f"{label} has an error."
+
+    def schema_export(self) -> dict:
+        """FastAPI /schema 端点标准返回体。三端共用。"""
+        return {
+            "feature_order": list(self.feature_order),
+            "numeric_features": list(self.numeric_features),
+            "categorical_features": list(self.categorical_features),
+            "target_column": self.target_column,
+            "fields": {
+                name: {
+                    "name": name,
+                    "label": self.field_label(name),
+                    "description": self.field_description(name),
+                    "type": self.field_type(name),
+                    "python_type": "float" if self.field_type(name) == "number" else "str",
+                    "placeholder": self.field_placeholder(name),
+                    "allowed_values": self.field_allowed_values(name),
+                    "options": (
+                        self.categorical_options(name)
+                        if name in self.categorical_features
+                        else []
+                    ),
+                    "example": DEFAULT_EXAMPLE.get(name),
+                    "error_messages": {
+                        "required": self.field_error_message(name, "required"),
+                        "type": self.field_error_message(name, "type"),
+                        "invalid": self.field_error_message(name, "invalid"),
+                    },
+                }
+                for name in self.feature_order
+            },
+            "example": self.default_example(),
+        }
+
+    def form_fields_metadata(self, extra_fields: list = None) -> list:
+        """Flask 模板使用的表单元数据列表，按 feature_order 顺序。
+
+        extra_fields: 额外插入到表单开头的非模型字段 (如 "names")。
+        """
+        items = []
+        if extra_fields:
+            for name in extra_fields:
+                items.append({
+                    "name": name,
+                    "label": FIELD_LABELS.get(name, name),
+                    "description": FIELD_DESCRIPTIONS.get(name, ""),
+                    "kind": "text_extra",
+                    "placeholder": "",
+                    "allowed_values": [],
+                    "options": [],
+                    "example": "",
+                    "required_error": f"{FIELD_LABELS.get(name, name)} cannot be empty.",
+                    "type_error": "",
+                })
+        for name in self.feature_order:
+            if name in self.categorical_features:
+                kind = "select"
+            else:
+                kind = "number"
+            items.append({
+                "name": name,
+                "label": self.field_label(name),
+                "description": self.field_description(name),
+                "kind": kind,
+                "placeholder": self.field_placeholder(name),
+                "allowed_values": self.field_allowed_values(name),
+                "options": (
+                    self.categorical_options(name)
+                    if name in self.categorical_features
+                    else []
+                ),
+                "example": DEFAULT_EXAMPLE.get(name),
+                "required_error": self.field_error_message(name, "required"),
+                "type_error": self.field_error_message(name, "type"),
+                "invalid_error": self.field_error_message(name, "invalid"),
+            })
+        return items
+
+    def input_spec(self) -> dict:
+        """BentoML 或 OpenAPI 使用的输入规范描述。"""
+        return {
+            "format": "dataframe or dict",
+            "n_features": self.n_features(),
+            "columns": list(self.feature_order),
+            "column_dtypes": {
+                name: ("float32" if self.field_type(name) == "number" else "string")
+                for name in self.feature_order
+            },
+            "example": self.default_example(),
+            "fields": [
+                {
+                    "name": name,
+                    "type": self.field_type(name),
+                    "allowed_values": self.field_allowed_values(name),
+                }
+                for name in self.feature_order
+            ],
+        }
+
 
 class SchemaMismatchError(RuntimeError):
     def __init__(self, check_name: str, detail: str):
@@ -403,18 +601,7 @@ def build_car_prediction_model(
     if categorical_features is None:
         categorical_features = list(CATEGORICAL_FEATURES)
     if example is None:
-        example = {
-            "enginesize": 130,
-            "curbweight": 2548,
-            "horsepower": 111,
-            "highwaympg": 27,
-            "carwidth": 64.1,
-            "wheelbase": 88.6,
-            "drivewheel": "rwd",
-            "citympg": 21,
-            "boreratio": 3.47,
-            "cylindernumber": "four",
-        }
+        example = dict(DEFAULT_EXAMPLE)
 
     cat_set = set(categorical_features)
     annotations = {}

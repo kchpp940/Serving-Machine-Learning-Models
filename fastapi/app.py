@@ -76,15 +76,7 @@ async def favicon():
 @app.get("/schema")
 async def get_schema():
     model = get_model()
-    return {
-        "feature_order": model.feature_order,
-        "numeric_features": model.numeric_features,
-        "categorical_features": model.categorical_features,
-        "target_column": model.target_column,
-        "categorical_options": {
-            f: model.categorical_options(f) for f in model.categorical_features
-        },
-    }
+    return model.schema_export()
 
 
 @app.get("/model_info")

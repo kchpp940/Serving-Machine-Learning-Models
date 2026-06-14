@@ -5,10 +5,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import bentoml
 import bentoml.sklearn
-from bentoml.io import NumpyNdarray, PandasDataFrame
+from bentoml.io import NumpyNdarray, PandasDataFrame, Text
 
 import numpy as np
 import pandas as pd
+import json
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER, SchemaMismatchError
@@ -21,6 +22,7 @@ service = bentoml.Service("gbr", runners=[predictor])
 _INTERFACE_FIELDS = list(FEATURE_ORDER)
 
 _model: CarPriceModel = None
+_input_spec_cache: dict = None
 
 
 def get_model() -> CarPriceModel:
@@ -30,6 +32,13 @@ def get_model() -> CarPriceModel:
         _model = CarPriceModel.from_sklearn_object(raw_bundle)
         _model.validate_service(_INTERFACE_FIELDS)
     return _model
+
+
+def input_spec() -> dict:
+    global _input_spec_cache
+    if _input_spec_cache is None:
+        _input_spec_cache = get_model().input_spec()
+    return _input_spec_cache
 
 
 @service.api(input=PandasDataFrame(), output=NumpyNdarray())
@@ -46,3 +55,9 @@ def predict(df: pd.DataFrame) -> np.ndarray:
 
     result = model.predict_dataframe(df)
     return np.array(result)
+
+
+@service.api(input=Text(), output=Text())
+def schema(_text: str = "") -> str:
+    spec = input_spec()
+    return json.dumps(spec, indent=2)
