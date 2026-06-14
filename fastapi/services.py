@@ -1,9 +1,10 @@
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 import numpy as np
 import joblib
+from fastapi.responses import JSONResponse
 
 from models import CarPrediction, PredictionResponse, ErrorResponse
 
@@ -12,6 +13,12 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "sklearn_gbr.pkl")
 MODEL_NAME = "sklearn_gbr"
 CURRENCY = "USD"
 FAVICON_PATH = os.path.join(BASE_DIR, "favicon.png")
+
+HTTP_400_BAD_REQUEST = 400
+HTTP_404_NOT_FOUND = 404
+HTTP_422_UNPROCESSABLE_ENTITY = 422
+HTTP_500_INTERNAL_SERVER_ERROR = 500
+HTTP_503_SERVICE_UNAVAILABLE = 503
 
 
 @dataclass
@@ -78,5 +85,35 @@ def build_success_response(predicted_value: float) -> PredictionResponse:
     )
 
 
-def build_error_response(detail: str) -> ErrorResponse:
-    return ErrorResponse(detail=detail)
+def build_error_response(detail: str, status_code: int = HTTP_500_INTERNAL_SERVER_ERROR) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail},
+    )
+
+
+def build_validation_error_response(errors: list) -> JSONResponse:
+    formatted = []
+    for err in errors:
+        loc = " -> ".join(str(x) for x in err.get("loc", []))
+        msg = err.get("msg", "Unknown validation error")
+        formatted.append(f"{loc}: {msg}" if loc else msg)
+    detail = "; ".join(formatted) if formatted else "Invalid request input"
+    return build_error_response(
+        f"Input validation failed: {detail}",
+        HTTP_422_UNPROCESSABLE_ENTITY,
+    )
+
+
+def build_health_response(model_state: ModelState) -> Dict[str, Any]:
+    if model_state.available:
+        return {
+            "status": "ok",
+            "model_available": True,
+            "model_error": None,
+        }
+    return {
+        "status": "degraded",
+        "model_available": False,
+        "model_error": model_state.error_message,
+    }

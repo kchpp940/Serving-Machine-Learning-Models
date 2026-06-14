@@ -15,6 +15,9 @@ class CarPrediction(BaseModel):
 
 
 class PredictionResponse(BaseModel):
+    class Config:
+        protected_namespaces = ()
+
     prediction: float = Field(..., description="Predicted car price")
     currency: str = Field(default="USD", description="Currency unit")
     model_name: str = Field(..., description="Name of the ML model used")

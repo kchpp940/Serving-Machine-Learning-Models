@@ -3,8 +3,8 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -14,7 +14,14 @@ from services import (
     build_features,
     run_prediction,
     build_success_response,
+    build_error_response,
+    build_validation_error_response,
+    build_health_response,
     FAVICON_PATH,
+    HTTP_400_BAD_REQUEST,
+    HTTP_404_NOT_FOUND,
+    HTTP_500_INTERNAL_SERVER_ERROR,
+    HTTP_503_SERVICE_UNAVAILABLE,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -50,31 +57,20 @@ app = FastAPI(
 # 5. Global exception handlers
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = []
-    for err in exc.errors():
-        loc = " -> ".join(str(x) for x in err.get("loc", []))
-        msg = err.get("msg", "Unknown validation error")
-        errors.append(f"{loc}: {msg}" if loc else msg)
-    detail = "; ".join(errors) if errors else "Invalid request input"
-    return JSONResponse(
-        status_code=422,
-        content={"detail": f"Input validation failed: {detail}"},
-    )
+    return build_validation_error_response(exc.errors())
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": str(exc.detail)},
-    )
+    return build_error_response(str(exc.detail), exc.status_code)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"},
+    logger.exception("Unhandled exception occurred")
+    return build_error_response(
+        f"Internal server error: {str(exc)}",
+        HTTP_500_INTERNAL_SERVER_ERROR,
     )
 
 
@@ -88,20 +84,16 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
     return note
 
 
-@app.get("/favicon.png", include_in_schema=False)
+@app.get("/favicon.png", include_in_schema=False, response_model=None)
 async def favicon():
     if not os.path.exists(FAVICON_PATH):
-        raise HTTPException(status_code=404, detail="Favicon not found")
+        return build_error_response("Favicon not found", HTTP_404_NOT_FOUND)
     return FileResponse(FAVICON_PATH)
 
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "ok",
-        "model_available": model_state.available,
-        "model_error": model_state.error_message,
-    }
+    return build_health_response(model_state)
 
 
 @app.post(
@@ -116,24 +108,24 @@ def health_check():
 )
 def predict(data: CarPrediction):
     if not model_state.available or model_state.model is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
+        return build_error_response(
+            (
                 "Prediction service is unavailable. "
                 f"Model not loaded: {model_state.error_message or 'Unknown reason'}"
             ),
+            HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     try:
         features = build_features(data)
     except (ValueError, TypeError) as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to construct feature array from input data: {str(e)}",
-        ) from e
+        return build_error_response(
+            f"Failed to construct feature array from input data: {str(e)}",
+            HTTP_400_BAD_REQUEST,
+        )
 
     predicted_value, error_msg = run_prediction(features, model_state.model)
     if error_msg is not None:
-        raise HTTPException(status_code=500, detail=error_msg)
+        return build_error_response(error_msg, HTTP_500_INTERNAL_SERVER_ERROR)
 
     return build_success_response(float(predicted_value))
