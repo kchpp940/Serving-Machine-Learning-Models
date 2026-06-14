@@ -164,18 +164,18 @@ class FeatureSchema:
     def encode_dict(self, values: dict) -> dict:
         return {f: self.encode_feature(f, values[f]) for f in self.feature_order}
 
-    def vector_from_dict(self, values: dict) -> np.ndarray:
+    def vector_from_dict(self, values: dict) -> pd.DataFrame:
         encoded = self.encode_dict(values)
-        vector = [encoded[name] for name in self.feature_order]
-        return np.array([vector])
+        vector = [[encoded[name] for name in self.feature_order]]
+        return pd.DataFrame(vector, columns=self.feature_order)
 
-    def vector_from_dataframe(self, df: pd.DataFrame) -> np.ndarray:
+    def vector_from_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         encoded_rows = []
         for _, row in df.iterrows():
             encoded_rows.append(
                 [self.encode_feature(f, row[f]) for f in self.feature_order]
             )
-        return np.array(encoded_rows)
+        return pd.DataFrame(encoded_rows, columns=self.feature_order)
 
     def categorical_classes(self, field_name: str) -> list:
         if field_name not in self.categorical_encoders:
@@ -356,3 +356,91 @@ def find_model_path(local_dir: str | None = None, local_name: str = "sklearn_gbr
     raise FileNotFoundError(
         f"未找到模型文件: 已搜索 {local_dir or '<无本地路径>'} 和 {SHARED_MODEL_PATH}"
     )
+
+
+# -----------------------------
+# Pydantic v1 / v2 兼容辅助
+# -----------------------------
+
+try:
+    import pydantic as _pydantic
+    _PYDANTIC_MAJOR = int(_pydantic.VERSION.split(".")[0])
+except ImportError:  # pragma: no cover
+    _pydantic = None
+    _PYDANTIC_MAJOR = 0
+
+
+def pydantic_major_version() -> int:
+    """返回当前安装的 Pydantic 主版本号 (1 或 2)；未安装时返回 0。"""
+    return _PYDANTIC_MAJOR
+
+
+def pydantic_field_names(model_cls) -> List[str]:
+    """跨 v1/v2 获取模型字段名列表，按定义顺序。"""
+    if _PYDANTIC_MAJOR >= 2:
+        return list(model_cls.model_fields.keys())
+    return list(model_cls.__fields__.keys())
+
+
+def build_car_prediction_model(
+    feature_order: List[str] = None,
+    categorical_features: List[str] = None,
+    example: dict = None,
+    class_name: str = "CarPrediction",
+):
+    """根据 FeatureSchema 常量动态生成 Pydantic 请求模型，v1/v2 都可用。
+
+    - 数值字段 -> float
+    - 分类字段 -> str
+    - 自动校验生成的模型字段与 feature_order 完全一致
+    - 通过 `pydantic_field_names()` 读取字段顺序，避免 v1/v2 API 漂移
+    """
+    if _pydantic is None:
+        raise RuntimeError("需要 pydantic 才能使用 build_car_prediction_model")
+
+    if feature_order is None:
+        feature_order = list(FEATURE_ORDER)
+    if categorical_features is None:
+        categorical_features = list(CATEGORICAL_FEATURES)
+    if example is None:
+        example = {
+            "enginesize": 130,
+            "curbweight": 2548,
+            "horsepower": 111,
+            "highwaympg": 27,
+            "carwidth": 64.1,
+            "wheelbase": 88.6,
+            "drivewheel": "rwd",
+            "citympg": 21,
+            "boreratio": 3.47,
+            "cylindernumber": "four",
+        }
+
+    cat_set = set(categorical_features)
+    annotations = {}
+    for name in feature_order:
+        annotations[name] = str if name in cat_set else float
+
+    namespace = {"__annotations__": annotations, "__module__": __name__}
+
+    if _PYDANTIC_MAJOR >= 2:
+        namespace["model_config"] = {"json_schema_extra": {"example": example}}
+    else:
+        config_ns = {"schema_extra": {"example": example}}
+        namespace["Config"] = type("Config", (), config_ns)
+
+    BaseModel = _pydantic.BaseModel
+    model_cls = type(class_name, (BaseModel,), namespace)
+
+    actual = pydantic_field_names(model_cls)
+    if actual != list(feature_order):
+        raise RuntimeError(
+            f"生成的 Pydantic 模型字段 {actual} 与 feature_order {list(feature_order)} 不一致"
+        )
+
+    return model_cls
+
+
+def interface_fields_from_model(model_cls) -> List[str]:
+    """从 Pydantic 模型提取接口字段列表，保证三端校验使用同一份字段定义。"""
+    return pydantic_field_names(model_cls)

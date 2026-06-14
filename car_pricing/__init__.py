@@ -18,6 +18,10 @@ from car_pricing.feature_schema import (
     load_bundle,
     find_model_path,
     validate_service_schema,
+    pydantic_major_version,
+    pydantic_field_names,
+    build_car_prediction_model,
+    interface_fields_from_model,
 )
 
 from car_pricing.model_runtime import CarPriceModel
@@ -42,5 +46,9 @@ __all__ = [
     "load_bundle",
     "find_model_path",
     "validate_service_schema",
+    "pydantic_major_version",
+    "pydantic_field_names",
+    "build_car_prediction_model",
+    "interface_fields_from_model",
     "CarPriceModel",
 ]
