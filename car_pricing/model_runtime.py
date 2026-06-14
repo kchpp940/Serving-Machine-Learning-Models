@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 
@@ -23,6 +25,31 @@ except ImportError:  # pragma: no cover
 _DEFAULT_FEATURE_ORDER_LEGACY = list(FEATURE_ORDER)
 _NUMERIC_FEATURE_SET = set(NUMERIC_FEATURES)
 _CATEGORICAL_FEATURE_SET = set(CATEGORICAL_FEATURES)
+
+
+@dataclass
+class BatchPredictionItem:
+    row_index: int
+    prediction: Optional[float] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class BatchPredictionResult:
+    total_records: int
+    valid_count: int
+    invalid_count: int
+    results: List[BatchPredictionItem] = field(default_factory=list)
+
+    def to_dicts(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "row_index": item.row_index,
+                "prediction": item.prediction,
+                "error": item.error,
+            }
+            for item in self.results
+        ]
 
 
 def _is_legacy_bundle(obj) -> bool:
@@ -150,6 +177,42 @@ class CarPriceModel:
     def encode_dict(self, values: dict) -> dict:
         return self.schema.encode_dict(values)
 
+    # ---------- 校验 ----------
+
+    def validate_record(self, record: dict) -> Optional[str]:
+        """校验单条记录，返回错误信息字符串；通过返回 None。"""
+        required = set(self.feature_order)
+        missing = required - set(record.keys())
+        if missing:
+            return f"缺少字段: {', '.join(sorted(missing))}"
+
+        row_errors = []
+        for field in self.feature_order:
+            try:
+                self.encode_feature(field, record[field])
+            except (ValueError, TypeError) as e:
+                row_errors.append(f"{field}: {str(e)}")
+
+        if row_errors:
+            return "; ".join(row_errors)
+        return None
+
+    def validate_records(self, records: list) -> Tuple[List[int], List[Dict[str, Any]]]:
+        """批量校验记录列表。
+
+        返回 (有效索引列表, 错误项列表)。
+        错误项格式: {"row_index": int, "error": str}
+        """
+        valid_indices = []
+        errors = []
+        for idx, record in enumerate(records):
+            err = self.validate_record(record)
+            if err is None:
+                valid_indices.append(idx)
+            else:
+                errors.append({"row_index": idx, "error": err})
+        return valid_indices, errors
+
     # ---------- 推理 ----------
 
     def _vector_from_encoded(self, encoded: dict) -> np.ndarray:
@@ -166,6 +229,39 @@ class CarPriceModel:
     def predict_dataframe(self, df: pd.DataFrame) -> np.ndarray:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
+
+    def predict_records(self, records: list) -> BatchPredictionResult:
+        """批量预测记录列表，返回带行号和错误信息的结果。"""
+        feature_order = self.feature_order
+        results: List[BatchPredictionItem] = []
+        valid_rows: List[dict] = []
+        valid_indices: List[int] = []
+
+        for idx, record in enumerate(records):
+            err = self.validate_record(record)
+            if err is not None:
+                results.append(BatchPredictionItem(row_index=idx, error=err))
+                continue
+            valid_rows.append({f: record[f] for f in feature_order})
+            valid_indices.append(idx)
+
+        if valid_rows:
+            df = pd.DataFrame(valid_rows)
+            predictions = self.predict_dataframe(df)
+            for idx, pred in zip(valid_indices, predictions):
+                results.append(BatchPredictionItem(
+                    row_index=idx,
+                    prediction=float(pred),
+                ))
+
+        results.sort(key=lambda x: x.row_index)
+        valid_count = sum(1 for r in results if r.error is None)
+        return BatchPredictionResult(
+            total_records=len(records),
+            valid_count=valid_count,
+            invalid_count=len(records) - valid_count,
+            results=results,
+        )
 
     # ---------- FastAPI 兼容层 ----------
 

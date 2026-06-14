@@ -59,67 +59,25 @@ def predict(df: pd.DataFrame) -> np.ndarray:
 @service.api(input=JSON(), output=JSON())
 def predict_batch(input_json) -> dict:
     model = get_model()
-    feature_order = model.feature_order
-    required_fields = set(feature_order)
-
     records = input_json.get("records", [])
+
+    batch_result = model.predict_records(records)
+
     results = []
-    valid_rows = []
-    valid_indices = []
-
-    for idx, record in enumerate(records):
-        missing = required_fields - set(record.keys())
-        if missing:
-            results.append({
-                "row_index": idx,
-                "prediction": None,
-                "currency": MODEL_CURRENCY,
-                "model_name": MODEL_NAME,
-                "error": f"缺少字段: {', '.join(sorted(missing))}",
-            })
-            continue
-
-        row_errors = []
-        for field in feature_order:
-            try:
-                model.encode_feature(field, record[field])
-            except (ValueError, TypeError) as e:
-                row_errors.append(f"{field}: {str(e)}")
-
-        if row_errors:
-            results.append({
-                "row_index": idx,
-                "prediction": None,
-                "currency": MODEL_CURRENCY,
-                "model_name": MODEL_NAME,
-                "error": "; ".join(row_errors),
-            })
-            continue
-
-        valid_rows.append({f: record[f] for f in feature_order})
-        valid_indices.append(idx)
-
-    if valid_rows:
-        df = pd.DataFrame(valid_rows)
-        predictions = model.predict_dataframe(df)
-        for pos, (idx, pred) in enumerate(zip(valid_indices, predictions)):
-            results.append({
-                "row_index": idx,
-                "prediction": float(pred),
-                "currency": MODEL_CURRENCY,
-                "model_name": MODEL_NAME,
-                "error": None,
-            })
-
-    results.sort(key=lambda x: x["row_index"])
-    valid_count = sum(1 for r in results if r["error"] is None)
-    invalid_count = len(results) - valid_count
+    for item in batch_result.results:
+        results.append({
+            "row_index": item.row_index,
+            "prediction": item.prediction,
+            "currency": MODEL_CURRENCY,
+            "model_name": MODEL_NAME,
+            "error": item.error,
+        })
 
     return {
         "status": "ok",
-        "total_records": len(records),
-        "valid_count": valid_count,
-        "invalid_count": invalid_count,
+        "total_records": batch_result.total_records,
+        "valid_count": batch_result.valid_count,
+        "invalid_count": batch_result.invalid_count,
         "results": results,
     }
 

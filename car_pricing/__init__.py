@@ -10,7 +10,22 @@ from car_pricing.feature_schema import (
     is_model_bundle,
 )
 
-from car_pricing.model_runtime import CarPriceModel
+from car_pricing.model_runtime import (
+    CarPriceModel,
+    BatchPredictionItem,
+    BatchPredictionResult,
+)
+
+from car_pricing.api_client import (
+    CarPriceAPIClient,
+    SchemaInfo,
+    BatchPredictionResponse,
+    BatchPredictionResultItem,
+    APIClientError,
+    APIConnectionError,
+    APITimeoutError,
+    APIHTTPError,
+)
 
 __all__ = [
     "FeatureSchema",
@@ -23,4 +38,14 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "BatchPredictionItem",
+    "BatchPredictionResult",
+    "CarPriceAPIClient",
+    "SchemaInfo",
+    "BatchPredictionResponse",
+    "BatchPredictionResultItem",
+    "APIClientError",
+    "APIConnectionError",
+    "APITimeoutError",
+    "APIHTTPError",
 ]
