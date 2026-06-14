@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 from kivymd.app import MDApp
 from kivy.lang.builder import Builder
@@ -6,7 +7,14 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.clock import Clock
 from kivy.storage.jsonstore import JsonStore
 import certifi as cfi
-import requests as re
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from car_pricing.api_client import (
+    PredictionAPIClient,
+    PredictionResult,
+    HealthResult,
+)
 
 DEFAULT_API_URL = "http://10.0.2.2:8000"
 DEFAULT_TIMEOUT = 15
@@ -334,27 +342,18 @@ class MainApp(MDApp):
 
         def do_test(dt):
             try:
-                health_url = f"{test_url}/health"
-                resp = re.get(health_url, timeout=self.request_timeout, verify=cfi.where())
-                resp.raise_for_status()
-                data = resp.json()
-
-                if data.get("status") == "ok":
-                    version = data.get("version", "N/A")
-                    model_loaded = "Yes" if data.get("model_loaded") else "No"
-                    settings_screen.ids.health_status.text = f"✓ Connected! Version: {version}, Model: {model_loaded}"
-                    settings_screen.ids.health_status.text_color = 0, 0.8, 0, 1
-                else:
-                    settings_screen.ids.health_status.text = f"✗ Service not ready: {data}"
-                    settings_screen.ids.health_status.text_color = 1, 0.5, 0, 1
-            except re.exceptions.ConnectionError:
-                settings_screen.ids.health_status.text = "✗ Cannot connect to server"
-                settings_screen.ids.health_status.text_color = 1, 0, 0, 1
-            except re.exceptions.Timeout:
-                settings_screen.ids.health_status.text = "✗ Connection timed out"
-                settings_screen.ids.health_status.text_color = 1, 0.5, 0, 1
+                client = PredictionAPIClient(
+                    base_url=test_url,
+                    timeout=self.request_timeout,
+                    verify=cfi.where(),
+                )
+                result = client.health_check()
+                version = result.version or "N/A"
+                model_loaded = "Yes" if result.model_loaded else "No"
+                settings_screen.ids.health_status.text = f"✓ Connected! Version: {version}, Model: {model_loaded}"
+                settings_screen.ids.health_status.text_color = 0, 0.8, 0, 1
             except Exception as e:
-                settings_screen.ids.health_status.text = f"✗ Error: {str(e)}"
+                settings_screen.ids.health_status.text = PredictionAPIClient.format_error(e)
                 settings_screen.ids.health_status.text_color = 1, 0, 0, 1
 
         Clock.schedule_once(do_test, 0.1)
@@ -380,53 +379,20 @@ class MainApp(MDApp):
                     "cylindernumber": main_screen.ids.input_cylindernumber.text.strip(),
                 }
 
-                url = f"{self.api_base_url}/predict"
-                resp = re.post(url=url, json=values, timeout=self.request_timeout, verify=cfi.where())
-                resp.raise_for_status()
-                body = resp.json()
-
-                prediction = body.get("prediction")
-                if prediction is None:
-                    output.text = "Error: Server response missing 'prediction' field"
-                    output.text_color = 1, 0, 0, 1
-                else:
-                    currency = body.get("currency", "USD")
-                    output.text = f"Predicted Price: {prediction:.2f} {currency}"
-                    output.text_color = 0, 0.8, 0, 1
+                client = PredictionAPIClient(
+                    base_url=self.api_base_url,
+                    timeout=self.request_timeout,
+                    verify=cfi.where(),
+                )
+                result = client.predict(values)
+                output.text = f"Predicted Price: {result.prediction:.2f} {result.currency}"
+                output.text_color = 0, 0.8, 0, 1
 
             except ValueError as e:
-                output.text = f"Input Error: Please check all numeric fields"
+                output.text = "Input Error: Please check all numeric fields"
                 output.text_color = 1, 0.5, 0, 1
-            except re.exceptions.ConnectionError:
-                output.text = "Connection Error: Cannot reach the prediction service. Check API URL and network."
-                output.text_color = 1, 0, 0, 1
-            except re.exceptions.Timeout:
-                output.text = "Timeout: Request took too long. Try increasing timeout in Settings."
-                output.text_color = 1, 0.5, 0, 1
-            except re.exceptions.HTTPError as e:
-                detail = ""
-                error_type = ""
-                try:
-                    err_data = resp.json()
-                    detail = err_data.get("detail", "")
-                    error_type = err_data.get("error", "")
-                except Exception:
-                    pass
-
-                if resp.status_code == 400:
-                    output.text = f"Invalid Input: {detail or 'Please check your values'}"
-                    output.text_color = 1, 0.5, 0, 1
-                elif resp.status_code == 404:
-                    output.text = "Error: Prediction endpoint not found. Check API URL."
-                    output.text_color = 1, 0, 0, 1
-                elif resp.status_code == 500:
-                    output.text = f"Server Error: {detail or 'Internal server error'}"
-                    output.text_color = 1, 0, 0, 1
-                else:
-                    output.text = f"HTTP Error {resp.status_code}: {error_type or str(e)}"
-                    output.text_color = 1, 0, 0, 1
             except Exception as e:
-                output.text = f"Unexpected Error: {str(e)}"
+                output.text = PredictionAPIClient.format_error(e)
                 output.text_color = 1, 0, 0, 1
 
         Clock.schedule_once(do_predict, 0.1)

@@ -1,9 +1,32 @@
 import os
+import sys
 import streamlit as st
-import requests as re
 
-DEFAULT_API_URL = "http://localhost:8000"
-DEFAULT_TIMEOUT = 10
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from car_pricing.api_client import (
+    PredictionAPIClient,
+    PredictionResult,
+    HealthResult,
+    SchemaResult,
+    APIHTTPError,
+    APIConnectionError,
+    APITimeoutError,
+    APIInvalidResponseError,
+)
+
+FIELD_DISPLAY_NAMES = {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway Miles Per Gallon",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheel Base",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City Miles Per Gallon",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders",
+}
 
 DEFAULT_SCHEMA = {
     "feature_order": [
@@ -35,71 +58,36 @@ DEFAULT_SCHEMA = {
     },
 }
 
-FIELD_DISPLAY_NAMES = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway Miles Per Gallon",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheel Base",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City Miles Per Gallon",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
-}
+
+def get_api_client(base_url: str = None, timeout: int = None) -> PredictionAPIClient:
+    return PredictionAPIClient(base_url=base_url, timeout=timeout)
 
 
 def get_api_config():
     if "api_base_url" not in st.session_state:
-        st.session_state.api_base_url = os.environ.get("API_BASE_URL", DEFAULT_API_URL)
+        st.session_state.api_base_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
     if "request_timeout" not in st.session_state:
-        st.session_state.request_timeout = int(os.environ.get("API_REQUEST_TIMEOUT", str(DEFAULT_TIMEOUT)))
+        st.session_state.request_timeout = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
     return st.session_state.api_base_url, st.session_state.request_timeout
 
 
 def check_api_health(api_base_url, timeout):
-    url = f"{api_base_url.rstrip('/')}/health"
+    client = get_api_client(base_url=api_base_url, timeout=timeout)
     try:
-        resp = re.get(url, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("status") == "ok":
-            return True, data
-        return False, data
-    except re.exceptions.ConnectionError:
-        return False, None
+        result = client.health_check()
+        return result.status == "ok", result.raw_response
     except Exception:
         return False, None
 
 
 @st.cache_data(show_spinner=False)
 def fetch_schema(api_base_url, timeout):
-    url = f"{api_base_url.rstrip('/')}/schema"
+    client = get_api_client(base_url=api_base_url, timeout=timeout)
     try:
-        resp = re.get(url, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        required = ["feature_order", "numeric_features", "categorical_features", "categorical_options"]
-        missing = [k for k in required if k not in data]
-        if missing:
-            return None, f"Schema missing fields: {', '.join(missing)}"
-        return data, None
-    except re.exceptions.ConnectionError:
-        return None, "Unable to connect to the prediction service to fetch schema."
-    except re.exceptions.Timeout:
-        return None, "Schema request timed out."
-    except re.exceptions.HTTPError as e:
-        detail = ""
-        try:
-            err_data = resp.json()
-            detail = err_data.get("detail", err_data.get("error", ""))
-        except Exception:
-            pass
-        return None, f"Server returned error when fetching schema: {detail or str(e)}"
-    except ValueError:
-        return None, "Schema response was not valid JSON."
+        result = client.get_schema()
+        return result.raw_response, None
     except Exception as e:
-        return None, f"Unexpected error fetching schema: {str(e)}"
+        return None, PredictionAPIClient.format_error(e)
 
 
 def build_form(schema):
@@ -200,46 +188,17 @@ def main():
         for field in schema["feature_order"]:
             values[field] = inputs[field]
 
-        url = f"{st.session_state.api_base_url.rstrip('/')}/predict"
+        client = get_api_client(
+            base_url=st.session_state.api_base_url,
+            timeout=st.session_state.request_timeout,
+        )
+
         with st.spinner("Predicting..."):
             try:
-                res = re.post(url, json=values, timeout=st.session_state.request_timeout)
-                res.raise_for_status()
-                body = res.json()
-
-                prediction = body.get("prediction")
-                if prediction is None:
-                    st.error(f"Unexpected response format from server. Missing 'prediction' field. Response: {body}")
-                else:
-                    currency = body.get("currency", "USD")
-                    st.success(f"The Price of the {names} is **{prediction:.2f} {currency}**")
-
-            except re.exceptions.ConnectionError:
-                st.error("❌ **Connection Failed**\n\nUnable to connect to the prediction service. Please check:\n1. The API URL is correct\n2. The API server is running\n3. Your network connection")
-            except re.exceptions.Timeout:
-                st.error("⏱️ **Request Timed Out**\n\nThe request to the prediction service timed out. You can increase the timeout in the sidebar settings, or try again later.")
-            except re.exceptions.HTTPError as e:
-                detail = ""
-                error_type = ""
-                try:
-                    err_data = res.json()
-                    detail = err_data.get("detail", "")
-                    error_type = err_data.get("error", "")
-                except Exception:
-                    pass
-
-                if res.status_code == 400:
-                    st.error(f"⚠️ **Invalid Input**\n\n{error_type}: {detail or 'Please check your input values and try again.'}")
-                elif res.status_code == 404:
-                    st.error(f"🔍 **Endpoint Not Found**\n\nThe prediction endpoint was not found. Please check the API URL.")
-                elif res.status_code == 500:
-                    st.error(f"💥 **Server Error**\n\n{error_type}: {detail or 'The server encountered an internal error. Please try again later.'}")
-                else:
-                    st.error(f"❌ **HTTP Error {res.status_code}**\n\n{error_type}: {detail or str(e)}")
-            except ValueError:
-                st.error("📝 **Invalid Response**\n\nThe server returned an invalid response that could not be parsed as JSON. Please try again later.")
+                result = client.predict(values)
+                st.success(f"The Price of the {names} is **{result.prediction:.2f} {result.currency}**")
             except Exception as e:
-                st.error(f"❌ **Unexpected Error**\n\nAn unexpected error occurred: {str(e)}")
+                st.error(PredictionAPIClient.format_error(e))
 
 
 if __name__ == "__main__":
