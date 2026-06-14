@@ -1,12 +1,8 @@
-import joblib
 import numpy as np
 
-from schema import MODEL_FEATURE_ORDER
+from model_bundle_loader import get_bundle
 
 
 def predict_price(features: dict) -> np.ndarray:
-    feature_values = [features[name] for name in MODEL_FEATURE_ORDER]
-    data = np.array([feature_values])
-    model = joblib.load("./models/sklearn_gbr.pkl")
-    predictions = model.predict(data)
-    return predictions
+    bundle = get_bundle()
+    return bundle.predict(features)
