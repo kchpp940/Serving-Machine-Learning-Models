@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 try:
     import requests
@@ -36,6 +36,14 @@ class APIHTTPError(APIClientError):
         self.status_code = status_code
         self.detail = detail
         super().__init__(message or f"HTTP {status_code}: {detail}")
+
+
+# ---------- 兼容旧名称的异常别名 ----------
+
+CarPriceAPIError = APIClientError
+CarPriceConnectionError = APIConnectionError
+CarPriceTimeoutError = APITimeoutError
+CarPriceHTTPError = APIHTTPError
 
 
 @dataclass
@@ -171,7 +179,11 @@ class CarPriceAPIClient:
     # ---------- 单条预测 ----------
 
     def predict(self, values: dict) -> float:
-        """单条预测，返回预测价格。"""
+        """单条预测，返回预测价格。
+
+        兼容旧协议：POST /predict 入参为字段 dict，
+        响应为 {"prediction": <float>, "status": "ok"}。
+        """
         data = self._request("POST", "/predict", json=values)
         prediction = data.get("prediction")
         if prediction is None:
@@ -242,3 +254,30 @@ class CarPriceAPIClient:
                     "errors": row_errors,
                 })
         return errors
+
+
+# ---------- 兼容旧名称的客户端别名 ----------
+
+PredictionAPIClient = CarPriceAPIClient
+
+
+# ---------- 兼容旧 API 的错误格式化函数 ----------
+
+def format_error(exc: Union[Exception, APIClientError]) -> str:
+    """把客户端异常格式化成用户可读的错误消息。
+
+    兼容旧代码中对各类异常做统一文案展示的场景。
+    """
+    if isinstance(exc, APIConnectionError):
+        return "Unable to connect to the prediction service. Please check that the API server is running."
+    if isinstance(exc, APITimeoutError):
+        return "The request to the prediction service timed out. Please try again later."
+    if isinstance(exc, APIHTTPError):
+        detail = getattr(exc, "detail", "")
+        status = getattr(exc, "status_code", "?")
+        if detail:
+            return f"Server returned an error ({status}): {detail}"
+        return f"Server returned an error (HTTP {status})."
+    if isinstance(exc, APIClientError):
+        return f"Client error: {str(exc)}"
+    return f"An unexpected error occurred: {str(exc)}"
