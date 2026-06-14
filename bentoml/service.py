@@ -11,6 +11,12 @@ import numpy as np
 import pandas as pd
 
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing.feature_schema import (
+    calculate_schema_version,
+    diff_schema_versions,
+    prepare_training_data,
+    load_training_data,
+)
 
 
 _model_tag = "gbr:latest"
@@ -79,11 +85,16 @@ def _get_lineage_info():
     schema_version_from_labels = labels.get("schema_version") if labels else None
     schema_version_from_params = mlflow_params.get("schema_version")
     schema_version_from_training = training_metadata.get("schema_version")
+    schema_version_from_feature_schema = (
+        metadata.get("feature_schema", {}).get("schema_version") if metadata else None
+    )
     schema_version = schema_version_from_labels or schema_version_from_params or schema_version_from_training
 
     metrics_from_mlflow = dict(mlflow_metrics)
     metrics_from_training = training_metadata.get("metrics", {})
     metrics = metrics_from_training if metrics_from_training else metrics_from_mlflow
+
+    bundle_schema_dict = model.schema_dict_for_version
 
     consistency_checks = {
         "mlflow_run_id": {
@@ -106,14 +117,41 @@ def _get_lineage_info():
             "from_labels": schema_version_from_labels,
             "from_mlflow_params": schema_version_from_params,
             "from_training_metadata": schema_version_from_training,
+            "from_feature_schema_nested": schema_version_from_feature_schema,
             "consistent": len(set(filter(None, [
                 schema_version_from_model,
                 schema_version_from_labels,
                 schema_version_from_params,
-                schema_version_from_training
+                schema_version_from_training,
+                schema_version_from_feature_schema,
             ]))) <= 1,
         },
     }
+
+    schema_diffs = []
+    tm_feature_schema = training_metadata.get("feature_schema", {})
+    if tm_feature_schema and bundle_schema_dict != tm_feature_schema:
+        schema_diffs = diff_schema_versions(
+            tm_feature_schema, "training_metadata.feature_schema",
+            bundle_schema_dict, "bundle",
+        )
+
+    try:
+        csv_path = os.path.join(os.path.dirname(__file__), "Data", "cars.csv")
+        df = load_training_data(csv_path)
+        _, _, current_schema = prepare_training_data(df)
+        current_code_schema_dict = current_schema.schema_dict_for_version
+        current_code_sv = current_schema.schema_version
+        consistency_checks["schema_version"]["from_current_code"] = current_code_sv
+        if current_code_sv != schema_version_from_model:
+            consistency_checks["schema_version"]["consistent"] = False
+            code_diffs = diff_schema_versions(
+                current_code_schema_dict, "current_code",
+                bundle_schema_dict, "bundle",
+            )
+            schema_diffs.extend(code_diffs)
+    except Exception:
+        pass
 
     all_consistent = all(
         check["consistent"] for check in consistency_checks.values()
@@ -127,6 +165,7 @@ def _get_lineage_info():
         "schema_version": schema_version,
         "metrics": metrics,
         "consistency_checks": consistency_checks,
+        "schema_diffs": schema_diffs,
         "all_consistent": all_consistent,
         "model_mode": model.mode,
         "source": labels.get("source") if labels else None,
@@ -153,6 +192,7 @@ def metadata(_) -> dict:
         "consistency": {
             "all_checks_passed": lineage["all_consistent"],
             "details": lineage["consistency_checks"],
+            "schema_diffs": lineage["schema_diffs"],
         },
         "model_info": {
             "mode": model.mode,
@@ -161,6 +201,7 @@ def metadata(_) -> dict:
             "categorical_features": model.categorical_features,
             "target_column": model.target_column,
             "schema_version": model.schema_version,
+            "format_version": model.schema.format_version,
             "n_features": model.schema.n_features(),
         },
         "categorical_encoders": {

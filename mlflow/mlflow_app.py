@@ -15,6 +15,8 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
     calculate_data_version,
+    calculate_schema_version,
+    SCHEMA_FORMAT_VERSION,
 )
 
 
@@ -41,6 +43,7 @@ def main():
 
         schema_version = schema.schema_version
         print(f'Schema version: {schema_version}')
+        print(f'Schema format version: {schema.format_version}')
 
         schema_dict = schema.to_dict()
         schema_json = json.dumps(schema_dict, indent=2, ensure_ascii=False)
@@ -51,6 +54,7 @@ def main():
         mlflow.log_dict(schema_dict, "metadata/feature_schema.json")
 
         mlflow.log_param("schema_version", schema_version)
+        mlflow.log_param("schema_format_version", schema.format_version)
         mlflow.log_param("feature_order", str(schema.feature_order))
         mlflow.log_param("numeric_features", str(schema.numeric_features))
         mlflow.log_param("categorical_features", str(schema.categorical_features))
@@ -111,6 +115,7 @@ def main():
 
         training_metadata = {
             "schema_version": schema_version,
+            "schema_format_version": schema.format_version,
             "data_path": data_abs_path,
             "data_version": data_version,
             "data_shape": [df.shape[0], df.shape[1]],
