@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 import numpy as np
@@ -9,6 +11,19 @@ try:
     from sklearn.preprocessing import LabelEncoder
 except ImportError:  # pragma: no cover
     LabelEncoder = None
+
+
+def calculate_data_version(file_path: str, hash_length: int = 16) -> str:
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"数据文件不存在: {file_path}")
+
+    hash_sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_sha256.update(chunk)
+
+    full_hash = hash_sha256.hexdigest()
+    return full_hash[:hash_length] if hash_length > 0 else full_hash
 
 
 FEATURE_ORDER: List[str] = [

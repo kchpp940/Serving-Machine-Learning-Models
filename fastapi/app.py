@@ -5,55 +5,20 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pandas as pd
 import joblib
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi import HTTPException
-from fastapi.exceptions import RequestValidationError
-from models import CarPrediction, PredictionResponse, ErrorResponse, HealthResponse
+from models import CarPrediction, PredictionResponse
 import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 
 
-API_VERSION = "0.0.1"
-
 app = FastAPI(
     title="Car Price Prediction API",
-    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.
-
-## Response Protocol
-
-### Prediction Success Response (200 OK)
-Model semantic fields only — no transport-level status envelope:
-```json
-{
-  "prediction": 13295.27,
-  "currency": "USD",
-  "model_name": "sklearn_gbr"
-}
-```
-
-### Error Response
-```json
-{
-  "status": "error",
-  "error": "ErrorType",
-  "detail": "Detailed error message"
-}
-```
-
-### Health Check Response (200 OK)
-```json
-{
-  "status": "ok",
-  "service": "car-price-prediction-api",
-  "version": "0.0.1",
-  "model_loaded": true
-}
-```
-""",
-    version=API_VERSION,
+    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.""",
+    version="0.0.1",
     debug=True,
 )
 
@@ -84,30 +49,6 @@ async def startup_event():
         raise
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=400,
-        content={
-            "status": "error",
-            "error": "ValidationError",
-            "detail": str(exc.errors()),
-        },
-    )
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "status": "error",
-            "error": f"HTTP{exc.status_code}",
-            "detail": exc.detail,
-        },
-    )
-
-
 @app.get("/", response_class=PlainTextResponse)
 async def running():
     note = """
@@ -126,23 +67,7 @@ async def favicon():
     return FileResponse(favicon_path)
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Status"])
-async def health_check():
-    model_loaded = False
-    try:
-        model = get_model()
-        model_loaded = model is not None
-    except Exception:
-        model_loaded = False
-    return HealthResponse(
-        status="ok",
-        service="car-price-prediction-api",
-        version=API_VERSION,
-        model_loaded=model_loaded,
-    )
-
-
-@app.get("/schema", tags=["Schema"])
+@app.get("/schema")
 async def get_schema():
     model = get_model()
     return {
@@ -156,25 +81,13 @@ async def get_schema():
     }
 
 
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-    responses={
-        400: {"model": ErrorResponse, "description": "Invalid input data"},
-        500: {"model": ErrorResponse, "description": "Server error"},
-    },
-    tags=["Prediction"],
-)
+@app.post("/predict", response_model=PredictionResponse)
 def predict(data: CarPrediction):
     try:
         model = get_model()
         predictions = model.predict_from_pydantic(data)
         value = float(predictions[0])
-        return PredictionResponse(
-            prediction=value,
-            currency="USD",
-            model_name="sklearn_gbr",
-        )
+        return PredictionResponse(prediction=value)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

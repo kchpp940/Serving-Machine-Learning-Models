@@ -13,11 +13,10 @@ package.domain = org.test.appname
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas,json
+source.include_exts = py,png,jpg,kv,atlas
 
 # (list) List of inclusions using pattern matching
-# IMPORTANT: car_pricing/ must be copied into androidapp/ before build (see prepare_build.sh)
-source.include_patterns = car_pricing/**/*.py,car_pricing/**/*.json
+#source.include_patterns = assets/*,images/*.png
 
 # (list) Source files to exclude (let empty to not exclude anything)
 #source.exclude_exts = spec
@@ -37,7 +36,7 @@ version = 0.1
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,kivymd,certifi>=2018.4.16,requests>=2.28.0
+requirements = python3,kivy, kivymd, certifi>=2018.4.16
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
