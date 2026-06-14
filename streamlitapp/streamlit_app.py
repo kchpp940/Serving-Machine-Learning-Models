@@ -10,6 +10,7 @@ import pandas as pd
 from car_pricing.api_client import (
     CarPriceAPIClient,
     SchemaInfo,
+    PredictionResult,
     BatchPredictionResponse,
     APIConnectionError,
     APITimeoutError,
@@ -140,8 +141,8 @@ def render_single_prediction(schema: SchemaInfo):
 
         client = get_client()
         try:
-            prediction = client.predict(values)
-            st.success(f"The Price of the {names} is {prediction:.2f}$")
+            result = client.predict(values)
+            st.success(f"The Price of the {names} is {result.prediction:.2f} {result.currency}")
         except APIConnectionError:
             st.error("Unable to connect to the prediction service. Please check that the API server is running.")
         except APITimeoutError:

@@ -41,13 +41,15 @@ class CarPrediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     prediction: float
-    status: str = "ok"
+    currency: str = "USD"
+    model_name: str = ""
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "status": "ok",
+                "currency": "USD",
+                "model_name": "sklearn_gbr",
             }
         }
 

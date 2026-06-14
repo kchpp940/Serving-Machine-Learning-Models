@@ -12,16 +12,18 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import (
     CarPriceModel,
-    BatchPredictionItem,
-    BatchPredictionResult,
+    BatchPredictionItem as _ModelBatchPredictionItem,
+    BatchPredictionResult as _ModelBatchPredictionResult,
 )
 
 from car_pricing.api_client import (
     CarPriceAPIClient,
     PredictionAPIClient,
     SchemaInfo,
+    PredictionResult,
     BatchPredictionResponse,
     BatchPredictionResultItem,
+    BatchPredictionItem,
     APIClientError,
     APIConnectionError,
     APITimeoutError,
@@ -48,13 +50,13 @@ __all__ = [
     "is_model_bundle",
     # model_runtime
     "CarPriceModel",
-    "BatchPredictionItem",
-    "BatchPredictionResult",
-    # api_client - 新名称
+    # api_client - 新名称 / 统一协议类型
     "CarPriceAPIClient",
     "SchemaInfo",
+    "PredictionResult",
     "BatchPredictionResponse",
     "BatchPredictionResultItem",
+    "BatchPredictionItem",
     "APIClientError",
     "APIConnectionError",
     "APITimeoutError",

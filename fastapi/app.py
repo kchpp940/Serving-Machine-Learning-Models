@@ -90,7 +90,11 @@ def predict(data: CarPrediction):
         model = get_model()
         predictions = model.predict_from_pydantic(data)
         value = float(predictions[0])
-        return PredictionResponse(prediction=value)
+        return PredictionResponse(
+            prediction=value,
+            currency=MODEL_CURRENCY,
+            model_name=MODEL_NAME,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

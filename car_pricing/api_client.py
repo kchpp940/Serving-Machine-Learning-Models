@@ -77,12 +77,35 @@ class SchemaInfo:
 
 
 @dataclass
+class PredictionResult:
+    """单条预测的 canonical 返回结果。
+
+    字段:
+        prediction: 预测价格
+        currency: 货币单位（默认 USD）
+        model_name: 模型名称
+    """
+    prediction: float
+    currency: str = "USD"
+    model_name: str = ""
+
+
+@dataclass
 class BatchPredictionResultItem:
+    """单条批量预测结果。
+
+    与服务端 BatchPredictionItem 字段完全对齐:
+        row_index/prediction/currency/model_name/error
+    """
     row_index: int
     prediction: Optional[float] = None
     currency: str = "USD"
     model_name: str = ""
     error: Optional[str] = None
+
+
+# 批量结果字段与服务端完全对齐的别名
+BatchPredictionItem = BatchPredictionResultItem
 
 
 @dataclass
@@ -178,17 +201,29 @@ class CarPriceAPIClient:
 
     # ---------- 单条预测 ----------
 
-    def predict(self, values: dict) -> float:
-        """单条预测，返回预测价格。
+    def predict(self, values: dict) -> PredictionResult:
+        """单条预测，返回 canonical 结果。
 
-        兼容旧协议：POST /predict 入参为字段 dict，
-        响应为 {"prediction": <float>, "status": "ok"}。
+        Canonical 响应字段:
+            prediction: 预测价格（必填）
+            currency: 货币单位（可选，默认 USD）
+            model_name: 模型名称（可选，默认空串）
+
+        旧响应容错:
+            只带 {"prediction": ..., "status": "ok"}
+            status 字段只做兼容，不进入返回类型。
         """
         data = self._request("POST", "/predict", json=values)
         prediction = data.get("prediction")
         if prediction is None:
             raise APIClientError(f"响应中缺少 prediction 字段: {data}")
-        return float(prediction)
+        currency = data.get("currency", "USD")
+        model_name = data.get("model_name", "")
+        return PredictionResult(
+            prediction=float(prediction),
+            currency=currency,
+            model_name=model_name,
+        )
 
     # ---------- 批量预测 ----------
 
