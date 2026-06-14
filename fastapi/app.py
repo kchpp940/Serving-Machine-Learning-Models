@@ -1,44 +1,43 @@
 # 1. Library imports
 import os
+import logging
 from contextlib import asynccontextmanager
 
-import numpy as np
-import pandas as pd
-import joblib
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from models import CarPrediction, PredictionResponse, ErrorResponse
+from services import (
+    ModelState,
+    build_features,
+    run_prediction,
+    build_success_response,
+    FAVICON_PATH,
+)
 
-# 2. Path resolution based on current module location
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "sklearn_gbr.pkl")
-MODEL_NAME = "sklearn_gbr"
-FAVICON_PATH = os.path.join(BASE_DIR, "favicon.png")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# 3. App state storage for the loaded model
-ml_model = None
+model_state = ModelState()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global ml_model
-    try:
-        if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(
-                f"Model file not found at {MODEL_PATH}. "
-                "Please ensure the trained model exists in the models directory."
-            )
-        ml_model = joblib.load(MODEL_PATH)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load model during startup: {str(e)}") from e
+    global model_state
+    model_state = ModelState.load()
+    if model_state.available:
+        logger.info("Model loaded successfully.")
+    else:
+        logger.warning(
+            f"Model failed to load: {model_state.error_message}. "
+            "Service will continue running but /predict will return errors."
+        )
     yield
-    ml_model = None
+    model_state = ModelState()
 
 
-# 4. Create the app object
 app = FastAPI(
     title="Car Price Prediction API",
     description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.""",
@@ -96,6 +95,15 @@ async def favicon():
     return FileResponse(FAVICON_PATH)
 
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "model_available": model_state.available,
+        "model_error": model_state.error_message,
+    }
+
+
 @app.post(
     "/predict",
     response_model=PredictionResponse,
@@ -103,57 +111,29 @@ async def favicon():
         400: {"model": ErrorResponse, "description": "Bad request / Invalid input"},
         422: {"model": ErrorResponse, "description": "Validation error"},
         500: {"model": ErrorResponse, "description": "Prediction service error"},
+        503: {"model": ErrorResponse, "description": "Service unavailable"},
     },
 )
 def predict(data: CarPrediction):
-    if ml_model is None:
+    if not model_state.available or model_state.model is None:
         raise HTTPException(
-            status_code=500,
-            detail="Model is not loaded. Please contact the administrator.",
+            status_code=503,
+            detail=(
+                "Prediction service is unavailable. "
+                f"Model not loaded: {model_state.error_message or 'Unknown reason'}"
+            ),
         )
 
     try:
-        features = np.array(
-            [
-                [
-                    data.enginesize,
-                    data.curbweight,
-                    data.horsepower,
-                    data.highwaympg,
-                    data.carwidth,
-                    data.wheelbase,
-                    data.drivewheel,
-                    data.citympg,
-                    data.boreratio,
-                    data.cylindernumber,
-                ]
-            ],
-            dtype=np.float64,
-        )
+        features = build_features(data)
     except (ValueError, TypeError) as e:
         raise HTTPException(
             status_code=400,
             detail=f"Failed to construct feature array from input data: {str(e)}",
         ) from e
 
-    try:
-        predictions = ml_model.predict(features)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed during model inference: {str(e)}",
-        ) from e
+    predicted_value, error_msg = run_prediction(features, model_state.model)
+    if error_msg is not None:
+        raise HTTPException(status_code=500, detail=error_msg)
 
-    try:
-        predicted_value = float(predictions[0])
-    except (IndexError, ValueError, TypeError) as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to parse model prediction result: {str(e)}",
-        ) from e
-
-    return PredictionResponse(
-        prediction=predicted_value,
-        currency="USD",
-        model_name=MODEL_NAME,
-    )
+    return build_success_response(float(predicted_value))
