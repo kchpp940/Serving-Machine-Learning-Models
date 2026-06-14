@@ -1,17 +1,11 @@
 <!DOCTYPE html>
 <html>
-<!--From https://codepen.io/frytyler/pen/EGdtg-->
-
 <head>
   <meta charset="UTF-8">
   <title>Car Price Prediction ML App</title>
-
   <link rel="stylesheet" href="{{ url_for('static', filename='w3.css') }}">
   <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
   <style type="text/css">
-    .mySlides {
-      display: none;
-    }
     .field-error {
       color: #d32f2f;
       font-size: 0.9em;
@@ -25,13 +19,21 @@
       margin-bottom: 16px;
       border-radius: 2px;
     }
-    .w3-input.error-border {
+    .w3-input.error-border,
+    .w3-select.error-border {
       border-color: #d32f2f !important;
       border-width: 2px !important;
     }
+    select.w3-select {
+      height: 42px;
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      background-color: white;
+      width: 100%;
+    }
   </style>
 </head>
-
 <body>
 
   <div class='w3-padding w3-black w3-center'>
@@ -52,147 +54,42 @@
       </div>
       {% endif %}
 
-      <p>
-        <label class="w3-text-black"><b>Name of Car</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('names') %}error-border{% endif %}"
-               name="names"
-               placeholder="Enter Name of Car"
-               type="text"
-               value="{% if form_data %}{{ form_data.get('names', '') }}{% endif %}">
-        {% if errors and errors.get('names') %}
-        <div class="field-error">{{ errors['names'] }}</div>
-        {% endif %}
-      </p>
+      {% for field_name in field_order %}
+        {% set field = fields[field_name] %}
+        <p>
+          <label class="w3-text-black"><b>{{ field.label }}</b></label>
 
-      <p>
-        <label class="w3-text-black"><b>Engine Size</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('enginesize') %}error-border{% endif %}"
-               name="enginesize"
-               placeholder="Enter the size of the Engine (e.g. 130)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('enginesize', '') }}{% endif %}">
-        {% if errors and errors.get('enginesize') %}
-        <div class="field-error">{{ errors['enginesize'] }}</div>
-        {% endif %}
-      </p>
+          {% if field.type == 'text' %}
+            <input class="w3-input w3-border {% if errors and errors.get(field_name) %}error-border{% endif %}"
+                   name="{{ field_name }}"
+                   placeholder="{{ field.placeholder }}"
+                   type="text"
+                   value="{% if form_data %}{{ form_data.get(field_name, '') }}{% endif %}">
+          {% elif field.type == 'numeric' %}
+            <input class="w3-input w3-border {% if errors and errors.get(field_name) %}error-border{% endif %}"
+                   name="{{ field_name }}"
+                   placeholder="{{ field.placeholder }}"
+                   type="number"
+                   step="any"
+                   value="{% if form_data %}{{ form_data.get(field_name, '') }}{% endif %}">
+          {% elif field.type == 'categorical' %}
+            <select class="w3-select {% if errors and errors.get(field_name) %}error-border{% endif %}"
+                    name="{{ field_name }}">
+              <option value="" disabled selected>{{ field.placeholder }}</option>
+              {% for option in field.options %}
+                <option value="{{ option.form_value }}"
+                        {% if form_data and form_data.get(field_name) == option.form_value %}selected{% endif %}>
+                  {{ option.display }}
+                </option>
+              {% endfor %}
+            </select>
+          {% endif %}
 
-      <p>
-        <label class="w3-text-black"><b>Curb Weight</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('curbweight') %}error-border{% endif %}"
-               name="curbweight"
-               placeholder="Enter Curb Weight (e.g. 2548)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('curbweight', '') }}{% endif %}">
-        {% if errors and errors.get('curbweight') %}
-        <div class="field-error">{{ errors['curbweight'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Horse Power</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('horsepower') %}error-border{% endif %}"
-               name="horsepower"
-               placeholder="Enter Horse Power (e.g. 111)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('horsepower', '') }}{% endif %}">
-        {% if errors and errors.get('horsepower') %}
-        <div class="field-error">{{ errors['horsepower'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Highway Miles Per Gallon</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('highwaympg') %}error-border{% endif %}"
-               name="highwaympg"
-               placeholder="Enter Highway MPG (e.g. 27)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('highwaympg', '') }}{% endif %}">
-        {% if errors and errors.get('highwaympg') %}
-        <div class="field-error">{{ errors['highwaympg'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Car Width</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('carwidth') %}error-border{% endif %}"
-               name="carwidth"
-               placeholder="Enter Car Width (e.g. 64.1)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('carwidth', '') }}{% endif %}">
-        {% if errors and errors.get('carwidth') %}
-        <div class="field-error">{{ errors['carwidth'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Wheel Base</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('wheelbase') %}error-border{% endif %}"
-               name="wheelbase"
-               placeholder="Enter Wheel Base Value (e.g. 88.6)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('wheelbase', '') }}{% endif %}">
-        {% if errors and errors.get('wheelbase') %}
-        <div class="field-error">{{ errors['wheelbase'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Drive Wheel</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('drivewheel') %}error-border{% endif %}"
-               name="drivewheel"
-               placeholder="Enter Drive Wheel (0=fwd, 1=rwd, 2=4wd)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('drivewheel', '') }}{% endif %}">
-        {% if errors and errors.get('drivewheel') %}
-        <div class="field-error">{{ errors['drivewheel'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>City Miles Per Gallon</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('citympg') %}error-border{% endif %}"
-               name="citympg"
-               placeholder="Enter City MPG (e.g. 21)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('citympg', '') }}{% endif %}">
-        {% if errors and errors.get('citympg') %}
-        <div class="field-error">{{ errors['citympg'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Bore Ratio</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('boreratio') %}error-border{% endif %}"
-               name="boreratio"
-               placeholder="Enter Bore Ratio (e.g. 3.47)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('boreratio', '') }}{% endif %}">
-        {% if errors and errors.get('boreratio') %}
-        <div class="field-error">{{ errors['boreratio'] }}</div>
-        {% endif %}
-      </p>
-
-      <p>
-        <label class="w3-text-black"><b>Number of Cylinders</b></label>
-        <input class="w3-input w3-border {% if errors and errors.get('cylindernumber') %}error-border{% endif %}"
-               name="cylindernumber"
-               placeholder="Enter Number of Cylinders (e.g. 2 = four, 3 = six)"
-               type="number"
-               step="any"
-               value="{% if form_data %}{{ form_data.get('cylindernumber', '') }}{% endif %}">
-        {% if errors and errors.get('cylindernumber') %}
-        <div class="field-error">{{ errors['cylindernumber'] }}</div>
-        {% endif %}
-      </p>
+          {% if errors and errors.get(field_name) %}
+          <div class="field-error">{{ errors[field_name] }}</div>
+          {% endif %}
+        </p>
+      {% endfor %}
 
       <p>
         <button type="submit"
@@ -200,7 +97,6 @@
       </p>
     </form>
   </div>
-
 
   <br>
 
@@ -213,5 +109,4 @@
   </div>
 
 </body>
-
 </html>
