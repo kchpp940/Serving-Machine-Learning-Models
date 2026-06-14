@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -25,3 +26,12 @@ class PredictionResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str = Field(..., description="Error message describing the issue")
+
+
+class HealthResponse(BaseModel):
+    class Config:
+        protected_namespaces = ()
+
+    status: str = Field(..., description="Service health status: ok or degraded")
+    model_available: bool = Field(..., description="Whether the ML model is loaded and ready")
+    model_error: Optional[str] = Field(default=None, description="Error message if model failed to load")

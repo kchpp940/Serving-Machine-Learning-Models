@@ -1,12 +1,12 @@
+import enum
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import joblib
-from fastapi.responses import JSONResponse
 
-from models import CarPrediction, PredictionResponse, ErrorResponse
+from models import CarPrediction
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "sklearn_gbr.pkl")
@@ -14,11 +14,34 @@ MODEL_NAME = "sklearn_gbr"
 CURRENCY = "USD"
 FAVICON_PATH = os.path.join(BASE_DIR, "favicon.png")
 
-HTTP_400_BAD_REQUEST = 400
-HTTP_404_NOT_FOUND = 404
-HTTP_422_UNPROCESSABLE_ENTITY = 422
-HTTP_500_INTERNAL_SERVER_ERROR = 500
-HTTP_503_SERVICE_UNAVAILABLE = 503
+
+class ErrorKind(enum.Enum):
+    MODEL_UNAVAILABLE = "model_unavailable"
+    BAD_REQUEST = "bad_request"
+    PREDICTION_FAILED = "prediction_failed"
+    VALIDATION_ERROR = "validation_error"
+    NOT_FOUND = "not_found"
+    INTERNAL_ERROR = "internal_error"
+
+
+@dataclass
+class ServiceError:
+    kind: ErrorKind
+    detail: str
+
+
+@dataclass
+class PredictionResult:
+    prediction: float
+    currency: str
+    model_name: str
+
+
+@dataclass
+class HealthResult:
+    status: str
+    model_available: bool
+    model_error: Optional[str]
 
 
 @dataclass
@@ -44,76 +67,97 @@ class ModelState:
             )
 
 
-def build_features(data: CarPrediction) -> np.ndarray:
-    return np.array(
-        [
+def build_features(data: CarPrediction) -> Union[np.ndarray, ServiceError]:
+    try:
+        return np.array(
             [
-                data.enginesize,
-                data.curbweight,
-                data.horsepower,
-                data.highwaympg,
-                data.carwidth,
-                data.wheelbase,
-                data.drivewheel,
-                data.citympg,
-                data.boreratio,
-                data.cylindernumber,
-            ]
-        ],
-        dtype=np.float64,
-    )
+                [
+                    data.enginesize,
+                    data.curbweight,
+                    data.horsepower,
+                    data.highwaympg,
+                    data.carwidth,
+                    data.wheelbase,
+                    data.drivewheel,
+                    data.citympg,
+                    data.boreratio,
+                    data.cylindernumber,
+                ]
+            ],
+            dtype=np.float64,
+        )
+    except (ValueError, TypeError) as e:
+        return ServiceError(
+            kind=ErrorKind.BAD_REQUEST,
+            detail=f"Failed to construct feature array from input data: {str(e)}",
+        )
 
 
 def run_prediction(
     features: np.ndarray, model: object
-) -> Tuple[Optional[float], Optional[str]]:
+) -> Union[float, ServiceError]:
     try:
         predictions = model.predict(features)
-        predicted_value = float(predictions[0])
-        return predicted_value, None
+        return float(predictions[0])
     except (IndexError, ValueError, TypeError) as e:
-        return None, f"Failed to parse prediction result: {str(e)}"
+        return ServiceError(
+            kind=ErrorKind.PREDICTION_FAILED,
+            detail=f"Failed to parse prediction result: {str(e)}",
+        )
     except Exception as e:
-        return None, f"Model inference failed: {str(e)}"
+        return ServiceError(
+            kind=ErrorKind.PREDICTION_FAILED,
+            detail=f"Model inference failed: {str(e)}",
+        )
 
 
-def build_success_response(predicted_value: float) -> PredictionResponse:
-    return PredictionResponse(
-        prediction=predicted_value,
+def predict(data: CarPrediction, state: ModelState) -> Union[PredictionResult, ServiceError]:
+    if not state.available or state.model is None:
+        return ServiceError(
+            kind=ErrorKind.MODEL_UNAVAILABLE,
+            detail=(
+                "Prediction service is unavailable. "
+                f"Model not loaded: {state.error_message or 'Unknown reason'}"
+            ),
+        )
+
+    features_result = build_features(data)
+    if isinstance(features_result, ServiceError):
+        return features_result
+
+    prediction_result = run_prediction(features_result, state.model)
+    if isinstance(prediction_result, ServiceError):
+        return prediction_result
+
+    return PredictionResult(
+        prediction=float(prediction_result),
         currency=CURRENCY,
         model_name=MODEL_NAME,
     )
 
 
-def build_error_response(detail: str, status_code: int = HTTP_500_INTERNAL_SERVER_ERROR) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={"detail": detail},
+def check_health(state: ModelState) -> HealthResult:
+    if state.available:
+        return HealthResult(
+            status="ok",
+            model_available=True,
+            model_error=None,
+        )
+    return HealthResult(
+        status="degraded",
+        model_available=False,
+        model_error=state.error_message,
     )
 
 
-def build_validation_error_response(errors: list) -> JSONResponse:
+def format_validation_errors(errors: list) -> ServiceError:
     formatted = []
     for err in errors:
         loc = " -> ".join(str(x) for x in err.get("loc", []))
         msg = err.get("msg", "Unknown validation error")
         formatted.append(f"{loc}: {msg}" if loc else msg)
     detail = "; ".join(formatted) if formatted else "Invalid request input"
-    return build_error_response(
-        f"Input validation failed: {detail}",
-        HTTP_422_UNPROCESSABLE_ENTITY,
+    return ServiceError(
+        kind=ErrorKind.VALIDATION_ERROR,
+        detail=f"Input validation failed: {detail}",
     )
-
-
-def build_health_response(model_state: ModelState) -> Dict[str, Any]:
-    if model_state.available:
-        return {
-            "status": "ok",
-            "model_available": True,
-            "model_error": None,
-        }
-    return {
-        "status": "degraded",
-        "model_available": False,
-        "model_error": model_state.error_message,
-    }

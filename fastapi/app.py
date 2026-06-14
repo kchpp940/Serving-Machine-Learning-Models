@@ -4,30 +4,58 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from models import CarPrediction, PredictionResponse, ErrorResponse
+from models import CarPrediction, PredictionResponse, ErrorResponse, HealthResponse
 from services import (
     ModelState,
-    build_features,
-    run_prediction,
-    build_success_response,
-    build_error_response,
-    build_validation_error_response,
-    build_health_response,
+    predict,
+    check_health,
+    format_validation_errors,
+    ServiceError,
+    PredictionResult,
+    ErrorKind,
     FAVICON_PATH,
-    HTTP_400_BAD_REQUEST,
-    HTTP_404_NOT_FOUND,
-    HTTP_500_INTERNAL_SERVER_ERROR,
-    HTTP_503_SERVICE_UNAVAILABLE,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 model_state = ModelState()
+
+
+ERROR_KIND_TO_HTTP_STATUS = {
+    ErrorKind.MODEL_UNAVAILABLE: 503,
+    ErrorKind.BAD_REQUEST: 400,
+    ErrorKind.PREDICTION_FAILED: 500,
+    ErrorKind.VALIDATION_ERROR: 422,
+    ErrorKind.NOT_FOUND: 404,
+    ErrorKind.INTERNAL_ERROR: 500,
+}
+
+
+def to_json_response(result):
+    if isinstance(result, PredictionResult):
+        return JSONResponse(
+            status_code=200,
+            content=PredictionResponse(
+                prediction=result.prediction,
+                currency=result.currency,
+                model_name=result.model_name,
+            ).dict(),
+        )
+    if isinstance(result, ServiceError):
+        status_code = ERROR_KIND_TO_HTTP_STATUS.get(result.kind, 500)
+        return JSONResponse(
+            status_code=status_code,
+            content={"detail": result.detail},
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Unexpected service result type"},
+    )
 
 
 @asynccontextmanager
@@ -54,23 +82,26 @@ app = FastAPI(
 )
 
 
-# 5. Global exception handlers
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return build_validation_error_response(exc.errors())
+    error = format_validation_errors(exc.errors())
+    return to_json_response(error)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return build_error_response(str(exc.detail), exc.status_code)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": str(exc.detail)},
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception occurred")
-    return build_error_response(
-        f"Internal server error: {str(exc)}",
-        HTTP_500_INTERNAL_SERVER_ERROR,
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
     )
 
 
@@ -87,45 +118,62 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
 @app.get("/favicon.png", include_in_schema=False, response_model=None)
 async def favicon():
     if not os.path.exists(FAVICON_PATH):
-        return build_error_response("Favicon not found", HTTP_404_NOT_FOUND)
+        error = ServiceError(kind=ErrorKind.NOT_FOUND, detail="Favicon not found")
+        return to_json_response(error)
     return FileResponse(FAVICON_PATH)
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Health check",
+    description="Returns service health status and model availability.",
+)
 def health_check():
-    return build_health_response(model_state)
+    result = check_health(model_state)
+    return HealthResponse(
+        status=result.status,
+        model_available=result.model_available,
+        model_error=result.model_error,
+    )
 
 
 @app.post(
     "/predict",
     response_model=PredictionResponse,
+    summary="Predict car price",
+    description="Predict the price of a car based on its features using the loaded ML model.",
     responses={
-        400: {"model": ErrorResponse, "description": "Bad request / Invalid input"},
-        422: {"model": ErrorResponse, "description": "Validation error"},
-        500: {"model": ErrorResponse, "description": "Prediction service error"},
-        503: {"model": ErrorResponse, "description": "Service unavailable"},
+        200: {
+            "description": "Successful prediction",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "prediction": 13495.0,
+                        "currency": "USD",
+                        "model_name": "sklearn_gbr",
+                    }
+                }
+            },
+        },
+        400: {
+            "model": ErrorResponse,
+            "description": "Bad request — feature array could not be constructed from input data",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "Validation error — input fields missing or wrong type",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Prediction service error — model inference or result parsing failed",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Service unavailable — model is not loaded",
+        },
     },
 )
-def predict(data: CarPrediction):
-    if not model_state.available or model_state.model is None:
-        return build_error_response(
-            (
-                "Prediction service is unavailable. "
-                f"Model not loaded: {model_state.error_message or 'Unknown reason'}"
-            ),
-            HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
-    try:
-        features = build_features(data)
-    except (ValueError, TypeError) as e:
-        return build_error_response(
-            f"Failed to construct feature array from input data: {str(e)}",
-            HTTP_400_BAD_REQUEST,
-        )
-
-    predicted_value, error_msg = run_prediction(features, model_state.model)
-    if error_msg is not None:
-        return build_error_response(error_msg, HTTP_500_INTERNAL_SERVER_ERROR)
-
-    return build_success_response(float(predicted_value))
+def predict_route(data: CarPrediction):
+    result = predict(data, model_state)
+    return to_json_response(result)
