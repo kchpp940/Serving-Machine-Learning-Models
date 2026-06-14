@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 import numpy as np
@@ -12,100 +9,6 @@ try:
     from sklearn.preprocessing import LabelEncoder
 except ImportError:  # pragma: no cover
     LabelEncoder = None
-
-
-def calculate_data_version(file_path: str, hash_length: int = 16) -> str:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"数据文件不存在: {file_path}")
-
-    hash_sha256 = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_sha256.update(chunk)
-
-    full_hash = hash_sha256.hexdigest()
-    return full_hash[:hash_length] if hash_length > 0 else full_hash
-
-
-SCHEMA_FORMAT_VERSION: str = "1"
-
-
-def calculate_schema_version(
-    schema_dict: dict,
-    hash_length: int = 16,
-) -> str:
-    canonical = {
-        "format_version": schema_dict.get("format_version"),
-        "feature_order": list(schema_dict.get("feature_order", [])),
-        "numeric_features": list(schema_dict.get("numeric_features", [])),
-        "categorical_features": list(schema_dict.get("categorical_features", [])),
-        "target_column": schema_dict.get("target_column"),
-        "categorical_encoders": {},
-    }
-    for col, enc_data in sorted(schema_dict.get("categorical_encoders", {}).items()):
-        canonical["categorical_encoders"][col] = {
-            "classes": list(enc_data.get("classes", [])),
-        }
-    config_str = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
-    full_hash = hashlib.sha256(config_str.encode("utf-8")).hexdigest()
-    return full_hash[:hash_length] if hash_length > 0 else full_hash
-
-
-def compute_schema_version(
-    feature_order: List[str],
-    numeric_features: List[str],
-    categorical_features: List[str],
-    target_column: str,
-    categorical_encoders: dict,
-    format_version: str = SCHEMA_FORMAT_VERSION,
-) -> str:
-    encoder_data = {}
-    for col in sorted(categorical_encoders.keys()):
-        le = categorical_encoders[col]
-        if hasattr(le, "classes_"):
-            encoder_data[col] = {"classes": list(le.classes_)}
-        elif isinstance(le, dict) and "classes" in le:
-            encoder_data[col] = {"classes": list(le["classes"])}
-        else:
-            encoder_data[col] = {"classes": list(le)}
-    schema_dict = {
-        "format_version": format_version,
-        "feature_order": list(feature_order),
-        "numeric_features": list(numeric_features),
-        "categorical_features": list(categorical_features),
-        "target_column": target_column,
-        "categorical_encoders": encoder_data,
-    }
-    return calculate_schema_version(schema_dict)
-
-
-def diff_schema_versions(
-    schema_dict_a: dict,
-    label_a: str,
-    schema_dict_b: dict,
-    label_b: str,
-) -> List[str]:
-    diffs = []
-    for key in ["format_version", "feature_order", "numeric_features",
-                 "categorical_features", "target_column"]:
-        va = schema_dict_a.get(key)
-        vb = schema_dict_b.get(key)
-        if va != vb:
-            diffs.append(f"{key}: {label_a}={va!r} vs {label_b}={vb!r}")
-
-    enc_a = schema_dict_a.get("categorical_encoders", {})
-    enc_b = schema_dict_b.get("categorical_encoders", {})
-    all_cols = sorted(set(list(enc_a.keys()) + list(enc_b.keys())))
-    for col in all_cols:
-        classes_a = list(enc_a.get(col, {}).get("classes", []))
-        classes_b = list(enc_b.get(col, {}).get("classes", []))
-        if classes_a != classes_b:
-            diffs.append(
-                f"categorical_encoders.{col}.classes: "
-                f"{label_a}={classes_a} vs {label_b}={classes_b}"
-            )
-
-    return diffs
 
 
 FEATURE_ORDER: List[str] = [
@@ -165,34 +68,6 @@ class FeatureSchema:
     categorical_features: List[str] = field(default_factory=lambda: list(CATEGORICAL_FEATURES))
     target_column: str = TARGET_COLUMN
     categorical_encoders: Dict[str, "LabelEncoder"] = field(default_factory=dict)
-    format_version: str = field(default=SCHEMA_FORMAT_VERSION)
-
-    @property
-    def schema_version(self) -> str:
-        return compute_schema_version(
-            self.feature_order,
-            self.numeric_features,
-            self.categorical_features,
-            self.target_column,
-            self.categorical_encoders,
-            self.format_version,
-        )
-
-    @property
-    def schema_dict_for_version(self) -> dict:
-        encoder_data = {}
-        for col, le in self.categorical_encoders.items():
-            encoder_data[col] = {
-                "classes": list(le.classes_),
-            }
-        return {
-            "format_version": self.format_version,
-            "feature_order": list(self.feature_order),
-            "numeric_features": list(self.numeric_features),
-            "categorical_features": list(self.categorical_features),
-            "target_column": self.target_column,
-            "categorical_encoders": encoder_data,
-        }
 
     def validate(self) -> None:
         for f in self.numeric_features:
@@ -318,8 +193,6 @@ class FeatureSchema:
                 "classes": list(le.classes_),
             }
         return {
-            "schema_version": self.schema_version,
-            "format_version": self.format_version,
             "feature_order": list(self.feature_order),
             "numeric_features": list(self.numeric_features),
             "categorical_features": list(self.categorical_features),
@@ -328,7 +201,7 @@ class FeatureSchema:
         }
 
     @classmethod
-    def from_dict(cls, data: dict, validate_version: bool = True) -> "FeatureSchema":
+    def from_dict(cls, data: dict) -> "FeatureSchema":
         if LabelEncoder is None:
             raise RuntimeError("需要 scikit-learn 才能使用 from_dict")
         schema = cls(
@@ -336,7 +209,6 @@ class FeatureSchema:
             numeric_features=list(data.get("numeric_features", NUMERIC_FEATURES)),
             categorical_features=list(data.get("categorical_features", CATEGORICAL_FEATURES)),
             target_column=data.get("target_column", TARGET_COLUMN),
-            format_version=data.get("format_version", SCHEMA_FORMAT_VERSION),
         )
         encoders = {}
         for col, enc_data in data.get("categorical_encoders", {}).items():
@@ -344,20 +216,6 @@ class FeatureSchema:
             le.classes_ = np.array(enc_data["classes"])
             encoders[col] = le
         schema.categorical_encoders = encoders
-
-        if validate_version and "schema_version" in data:
-            if schema.schema_version != data["schema_version"]:
-                diffs = diff_schema_versions(
-                    data, "stored",
-                    schema.schema_dict_for_version, "current_code",
-                )
-                diff_detail = "\n  ".join(diffs) if diffs else "unknown"
-                raise ValueError(
-                    f"Schema version mismatch: stored={data['schema_version']} vs "
-                    f"current_code={schema.schema_version}.\n"
-                    f"Differences:\n  {diff_detail}"
-                )
-
         return schema
 
     def validate_model_input(self, model) -> None:
