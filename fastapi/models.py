@@ -1,5 +1,6 @@
 import sys
 import os
+from typing import Optional, List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -39,12 +40,46 @@ class CarPrediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     prediction: float
-    status: str = "ok"
+    status: str = "success"
+    message: Optional[str] = None
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
+                "status": "success",
+                "message": "Prediction completed successfully",
+            }
+        }
+
+
+class ErrorResponse(BaseModel):
+    status: str = "error"
+    error: str
+    detail: Optional[str] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "error",
+                "error": "InvalidInput",
+                "detail": "enginesize must be a positive number",
+            }
+        }
+
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    service: str = "car-price-prediction-api"
+    version: str
+    model_loaded: bool
+
+    class Config:
+        schema_extra = {
+            "example": {
                 "status": "ok",
+                "service": "car-price-prediction-api",
+                "version": "0.0.1",
+                "model_loaded": True,
             }
         }

@@ -36,6 +36,24 @@ def home():
     return render_template("index.html")
 
 
+@app.route("/schema")
+def api_schema():
+    try:
+        model = utils._get_model()
+        categorical_options = {}
+        for f in model.categorical_features:
+            categorical_options[f] = model.categorical_options(f)
+        return jsonify({
+            "feature_order": model.feature_order,
+            "numeric_features": model.numeric_features,
+            "categorical_features": model.categorical_features,
+            "target_column": model.target_column,
+            "categorical_options": categorical_options,
+        })
+    except Exception as e:
+        return jsonify({"detail": f"Failed to load schema: {str(e)}"}), 500
+
+
 @app.route("/predict", methods=["GET", "POST"])
 def predict():
     if request.method == "POST":
