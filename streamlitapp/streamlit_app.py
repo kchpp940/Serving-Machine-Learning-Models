@@ -1,19 +1,30 @@
 import os
-import sys
 import streamlit as st
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from car_pricing.api_client import (
-    PredictionAPIClient,
-    PredictionResult,
-    HealthResult,
-    SchemaResult,
-    APIHTTPError,
-    APIConnectionError,
-    APITimeoutError,
-    APIInvalidResponseError,
-)
+try:
+    from car_pricing.api_client import (
+        PredictionAPIClient,
+        PredictionResult,
+        HealthResult,
+        SchemaResult,
+        APIHTTPError,
+        APIConnectionError,
+        APITimeoutError,
+        APIInvalidResponseError,
+    )
+except ImportError:
+    import sys as _sys
+    _sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from car_pricing.api_client import (
+        PredictionAPIClient,
+        PredictionResult,
+        HealthResult,
+        SchemaResult,
+        APIHTTPError,
+        APIConnectionError,
+        APITimeoutError,
+        APIInvalidResponseError,
+    )
 
 FIELD_DISPLAY_NAMES = {
     "enginesize": "Engine Size",

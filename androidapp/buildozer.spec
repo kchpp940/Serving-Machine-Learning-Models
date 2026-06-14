@@ -13,10 +13,11 @@ package.domain = org.test.appname
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,png,jpg,kv,atlas,json
 
 # (list) List of inclusions using pattern matching
-#source.include_patterns = assets/*,images/*.png
+# IMPORTANT: car_pricing/ must be copied into androidapp/ before build (see prepare_build.sh)
+source.include_patterns = car_pricing/**/*.py,car_pricing/**/*.json
 
 # (list) Source files to exclude (let empty to not exclude anything)
 #source.exclude_exts = spec

@@ -8,16 +8,34 @@ from kivy.clock import Clock
 from kivy.storage.jsonstore import JsonStore
 import certifi as cfi
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from car_pricing.api_client import (
+        PredictionAPIClient,
+        PredictionResult,
+        HealthResult,
+    )
+except ImportError:
+    _app_dir = os.path.abspath(os.path.dirname(__file__))
+    for _candidate in [
+        os.path.join(_app_dir, "car_pricing"),
+        os.path.join(_app_dir, "..", "car_pricing"),
+    ]:
+        if os.path.isdir(_candidate):
+            sys.path.insert(0, os.path.dirname(_candidate))
+            break
+    from car_pricing.api_client import (
+        PredictionAPIClient,
+        PredictionResult,
+        HealthResult,
+    )
 
 from car_pricing.api_client import (
-    PredictionAPIClient,
-    PredictionResult,
-    HealthResult,
+    DEFAULT_API_BASE_URL as _LIB_DEFAULT_URL,
+    DEFAULT_TIMEOUT as _LIB_DEFAULT_TIMEOUT,
 )
 
-DEFAULT_API_URL = "http://10.0.2.2:8000"
-DEFAULT_TIMEOUT = 15
+DEFAULT_API_URL = os.environ.get("ANDROID_API_BASE_URL", "http://10.0.2.2:8000")
+DEFAULT_TIMEOUT = int(os.environ.get("ANDROID_API_TIMEOUT", str(_LIB_DEFAULT_TIMEOUT)))
 
 KV = """
 ScreenManager:
