@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
@@ -23,6 +24,24 @@ def calculate_data_version(file_path: str, hash_length: int = 16) -> str:
             hash_sha256.update(chunk)
 
     full_hash = hash_sha256.hexdigest()
+    return full_hash[:hash_length] if hash_length > 0 else full_hash
+
+
+def calculate_schema_version(
+    feature_order: List[str],
+    numeric_features: List[str],
+    categorical_features: List[str],
+    target_column: str,
+    hash_length: int = 12,
+) -> str:
+    config = {
+        "feature_order": list(feature_order),
+        "numeric_features": list(numeric_features),
+        "categorical_features": list(categorical_features),
+        "target_column": target_column,
+    }
+    config_str = json.dumps(config, sort_keys=True, ensure_ascii=False)
+    full_hash = hashlib.sha256(config_str.encode("utf-8")).hexdigest()
     return full_hash[:hash_length] if hash_length > 0 else full_hash
 
 
@@ -83,6 +102,15 @@ class FeatureSchema:
     categorical_features: List[str] = field(default_factory=lambda: list(CATEGORICAL_FEATURES))
     target_column: str = TARGET_COLUMN
     categorical_encoders: Dict[str, "LabelEncoder"] = field(default_factory=dict)
+
+    @property
+    def schema_version(self) -> str:
+        return calculate_schema_version(
+            self.feature_order,
+            self.numeric_features,
+            self.categorical_features,
+            self.target_column,
+        )
 
     def validate(self) -> None:
         for f in self.numeric_features:
@@ -208,6 +236,7 @@ class FeatureSchema:
                 "classes": list(le.classes_),
             }
         return {
+            "schema_version": self.schema_version,
             "feature_order": list(self.feature_order),
             "numeric_features": list(self.numeric_features),
             "categorical_features": list(self.categorical_features),
@@ -216,7 +245,7 @@ class FeatureSchema:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "FeatureSchema":
+    def from_dict(cls, data: dict, validate_version: bool = True) -> "FeatureSchema":
         if LabelEncoder is None:
             raise RuntimeError("需要 scikit-learn 才能使用 from_dict")
         schema = cls(
@@ -231,6 +260,14 @@ class FeatureSchema:
             le.classes_ = np.array(enc_data["classes"])
             encoders[col] = le
         schema.categorical_encoders = encoders
+
+        if validate_version and "schema_version" in data:
+            if schema.schema_version != data["schema_version"]:
+                raise ValueError(
+                    f"Schema version mismatch: expected {data['schema_version']}, "
+                    f"got {schema.schema_version}. Feature processing logic may have changed."
+                )
+
         return schema
 
     def validate_model_input(self, model) -> None:

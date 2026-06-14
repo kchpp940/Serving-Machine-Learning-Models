@@ -136,6 +136,10 @@ class CarPriceModel:
     def target_column(self) -> str:
         return self.schema.target_column
 
+    @property
+    def schema_version(self) -> str:
+        return self.schema.schema_version
+
     def categorical_classes(self, field_name: str):
         return self.schema.categorical_classes(field_name)
 

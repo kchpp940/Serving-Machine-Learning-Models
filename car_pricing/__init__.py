@@ -9,6 +9,7 @@ from car_pricing.feature_schema import (
     bundle_model,
     is_model_bundle,
     calculate_data_version,
+    calculate_schema_version,
 )
 
 from car_pricing.model_runtime import CarPriceModel
@@ -24,5 +25,6 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "calculate_data_version",
+    "calculate_schema_version",
     "CarPriceModel",
 ]

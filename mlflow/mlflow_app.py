@@ -39,6 +39,9 @@ def main():
 
         X, y, schema = prepare_training_data(df)
 
+        schema_version = schema.schema_version
+        print(f'Schema version: {schema_version}')
+
         schema_dict = schema.to_dict()
         schema_json = json.dumps(schema_dict, indent=2, ensure_ascii=False)
         schema_path = os.path.join(os.path.dirname(__file__), "feature_schema.json")
@@ -47,6 +50,7 @@ def main():
         mlflow.log_artifact(schema_path, "metadata")
         mlflow.log_dict(schema_dict, "metadata/feature_schema.json")
 
+        mlflow.log_param("schema_version", schema_version)
         mlflow.log_param("feature_order", str(schema.feature_order))
         mlflow.log_param("numeric_features", str(schema.numeric_features))
         mlflow.log_param("categorical_features", str(schema.categorical_features))
@@ -70,6 +74,7 @@ def main():
         }
         model = GradientBoostingRegressor(**model_params)
 
+        mlflow.log_param("model_type", "GradientBoostingRegressor")
         for param_name, param_value in model_params.items():
             mlflow.log_param(f"model_{param_name}", param_value)
 
@@ -105,6 +110,7 @@ def main():
         mlflow.log_artifact(bundle_path, "model_bundle")
 
         training_metadata = {
+            "schema_version": schema_version,
             "data_path": data_abs_path,
             "data_version": data_version,
             "data_shape": [df.shape[0], df.shape[1]],
