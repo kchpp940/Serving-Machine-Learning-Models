@@ -23,16 +23,25 @@ def compute_schema_version(schema_dict: dict) -> str:
         "numeric_features": schema_dict.get("numeric_features", []),
         "categorical_features": schema_dict.get("categorical_features", []),
         "target_column": schema_dict.get("target_column", ""),
-        "display_names": schema_dict.get("display_names", {}),
         "categorical_options": {},
     }
     categorical_options = schema_dict.get("categorical_options", {})
+    categorical_encoders = schema_dict.get("categorical_encoders", {})
+
     for f in signature["categorical_features"]:
-        opts = categorical_options.get(f, [])
-        signature["categorical_options"][f] = [
-            opt.get("form_value", opt) if isinstance(opt, dict) else opt
-            for opt in opts
-        ]
+        if f in categorical_options:
+            opts = categorical_options[f]
+            signature["categorical_options"][f] = [
+                opt.get("form_value", opt) if isinstance(opt, dict) else opt
+                for opt in opts
+            ]
+        elif f in categorical_encoders:
+            signature["categorical_options"][f] = list(
+                categorical_encoders[f].get("classes", [])
+            )
+        else:
+            signature["categorical_options"][f] = []
+
     return _stable_hash(signature)
 
 
@@ -86,3 +95,11 @@ def attach_versions_to_schema(
     if data_source is not None:
         result["data_version"] = compute_data_version(data_source)
     return result
+
+
+def build_default_schema_dict(include_encoders: bool = True) -> dict:
+    from car_pricing.feature_schema import FeatureSchema
+    schema = FeatureSchema.default()
+    schema_dict = schema.to_dict(include_encoders=include_encoders)
+    schema_dict["schema_version"] = compute_schema_version(schema_dict)
+    return schema_dict

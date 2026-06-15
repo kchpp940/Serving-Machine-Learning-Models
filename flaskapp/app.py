@@ -1,15 +1,25 @@
 from flask import Flask, render_template, request, jsonify
 import utils
 
-from car_pricing.feature_schema import FeatureSchema
+from car_pricing.versioning import build_default_schema_dict
 
 app = Flask(__name__)
 
-_default_schema = FeatureSchema.default()
+_default_schema_dict = build_default_schema_dict(include_encoders=False)
 
 
 def _field_label(field_name: str) -> str:
-    return _default_schema.field_display_name(field_name)
+    return _default_schema_dict["display_names"].get(
+        field_name, field_name.replace("_", " ").title()
+    )
+
+
+def _field_default(field_name: str) -> str:
+    return _default_schema_dict["default_values"].get(field_name, "")
+
+
+def _is_numeric(field_name: str) -> bool:
+    return field_name in _default_schema_dict["numeric_features"]
 
 
 @app.route("/")
@@ -37,14 +47,14 @@ def predict():
         if not names:
             errors["names"] = "Car name cannot be empty."
 
-        schema = _default_schema
-        for field in schema.feature_order:
+        schema = _default_schema_dict
+        for field in schema["feature_order"]:
             raw_value = form_data.get(field, "").strip()
             if not raw_value:
                 errors[field] = f"{_field_label(field)} cannot be empty."
                 continue
             try:
-                if field in schema.numeric_features:
+                if _is_numeric(field):
                     parsed[field] = float(raw_value)
                 else:
                     parsed[field] = str(raw_value)
@@ -79,8 +89,8 @@ def api_predict():
     if data is None:
         return jsonify({"detail": "Request body must be valid JSON."}), 400
 
-    schema = _default_schema
-    required_fields = schema.feature_order
+    schema = _default_schema_dict
+    required_fields = schema["feature_order"]
     missing = [f for f in required_fields if f not in data]
     if missing:
         return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
@@ -89,7 +99,7 @@ def api_predict():
         parsed = {}
         for f in required_fields:
             try:
-                if f in schema.numeric_features:
+                if _is_numeric(f):
                     parsed[f] = float(data[f])
                 else:
                     parsed[f] = str(data[f])

@@ -5,18 +5,22 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from pydantic import BaseModel, Field, create_model
 
-from car_pricing.feature_schema import FeatureSchema
+from car_pricing.versioning import build_default_schema_dict
 
 
 def build_car_prediction_model() -> type:
-    schema = FeatureSchema.default()
+    schema_dict = build_default_schema_dict(include_encoders=False)
+    feature_order = schema_dict["feature_order"]
+    numeric_set = set(schema_dict["numeric_features"])
+    default_values = schema_dict["default_values"]
+
     fields = {}
-    for field_name in schema.feature_order:
-        if field_name in schema.numeric_features:
-            default_value = float(schema.field_default_value(field_name))
+    for field_name in feature_order:
+        if field_name in numeric_set:
+            default_value = float(default_values[field_name])
             fields[field_name] = (float, Field(default=default_value))
         else:
-            default_value = str(schema.field_default_value(field_name))
+            default_value = str(default_values[field_name])
             fields[field_name] = (str, Field(default=default_value))
 
     CarPrediction = create_model(
@@ -24,7 +28,7 @@ def build_car_prediction_model() -> type:
         **fields,
     )
 
-    example = {f: schema.field_default_value(f) for f in schema.feature_order}
+    example = {f: default_values[f] for f in feature_order}
     CarPrediction.__doc__ = "汽车价格预测输入"
 
     original_schema = CarPrediction.schema
