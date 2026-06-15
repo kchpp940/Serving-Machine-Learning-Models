@@ -6,69 +6,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests as re
 
+from car_pricing.prediction_protocol import (
+    BatchRowResult,
+    BatchPredictionResponse,
+    build_fallback_schema,
+    get_display_name_from_schema,
+    get_default_values_from_schema,
+    validate_values_from_schema,
+    format_value_for_display,
+)
+
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
-
-DEFAULT_SCHEMA = {
-    "feature_order": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "drivewheel", "citympg",
-        "boreratio", "cylindernumber",
-    ],
-    "numeric_features": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "citympg", "boreratio",
-    ],
-    "categorical_features": ["drivewheel", "cylindernumber"],
-    "target_column": "price",
-    "categorical_options": {
-        "drivewheel": [
-            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
-            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
-            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
-        ],
-        "cylindernumber": [
-            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
-            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
-            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
-            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
-            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
-            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
-            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
-        ],
-    },
-}
-
-FIELD_DISPLAY_NAMES = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway MPG",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheel Base",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City MPG",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
-}
-
-
-@dataclass
-class BatchRowResult:
-    row_id: Optional[str] = None
-    prediction: Optional[float] = None
-    error: Optional[str] = None
-    field_errors: Optional[Dict[str, str]] = None
-
-
-@dataclass
-class BatchResponse:
-    results: List[BatchRowResult] = field(default_factory=list)
-    success_count: int = 0
-    error_count: int = 0
-    total_count: int = 0
-    transport_error: Optional[str] = None
 
 
 @dataclass
@@ -78,75 +28,38 @@ class SchemaResponse:
     using_fallback: bool = False
 
 
-def get_display_name(field: str) -> str:
-    return FIELD_DISPLAY_NAMES.get(field, field.replace("_", " ").title())
+@dataclass
+class BatchTransportResponse:
+    results: List[BatchRowResult] = field(default_factory=list)
+    success_count: int = 0
+    error_count: int = 0
+    total_count: int = 0
+    transport_error: Optional[str] = None
 
 
 def get_api_base_url() -> str:
     return API_BASE_URL
 
 
-def get_default_values(schema: dict) -> Dict[str, Any]:
-    defaults: Dict[str, Any] = {}
-    numeric_set = set(schema.get("numeric_features", []))
-    categorical_set = set(schema.get("categorical_features", []))
-    categorical_options = schema.get("categorical_options", {})
+def get_display_name(field_name: str, schema: dict) -> str:
+    return get_display_name_from_schema(field_name, schema)
 
-    for field in schema.get("feature_order", []):
-        if field in numeric_set:
-            defaults[field] = 0.0
-        elif field in categorical_set:
-            opts = categorical_options.get(field, [])
-            if opts:
-                defaults[field] = opts[0]["form_value"]
-            else:
-                defaults[field] = ""
-        else:
-            defaults[field] = ""
-    return defaults
+
+def get_default_values(schema: dict) -> Dict[str, Any]:
+    return get_default_values_from_schema(schema)
 
 
 def validate_values(values: Dict[str, Any], schema: dict) -> Dict[str, str]:
-    errors: Dict[str, str] = {}
-    numeric_set = set(schema.get("numeric_features", []))
-    categorical_set = set(schema.get("categorical_features", []))
-    categorical_options = schema.get("categorical_options", {})
-
-    for field in schema.get("feature_order", []):
-        if field not in values:
-            errors[field] = "Missing value"
-            continue
-        val = values[field]
-        if field in numeric_set:
-            try:
-                float(val)
-            except (ValueError, TypeError):
-                errors[field] = "Must be a number"
-        elif field in categorical_set:
-            opts = categorical_options.get(field, [])
-            if opts:
-                valid_values = {opt["form_value"] for opt in opts}
-                if val not in valid_values:
-                    errors[field] = f"Invalid option: {val}"
-    return errors
+    return validate_values_from_schema(values, schema)
 
 
-def format_value_for_display(field: str, value, schema: dict) -> str:
-    categorical_options = schema.get("categorical_options", {})
-    opts = categorical_options.get(field, [])
-    if opts:
-        for opt in opts:
-            if opt["form_value"] == value:
-                return opt["display"]
-    if isinstance(value, float):
-        if value.is_integer():
-            return f"{int(value)}"
-        return f"{value:.2f}"
-    return str(value)
+def format_value(field_name: str, value: Any, schema: dict) -> str:
+    return format_value_for_display(field_name, value, schema)
 
 
 def fetch_schema() -> SchemaResponse:
     url = f"{API_BASE_URL.rstrip('/')}/schema"
+    fallback = build_fallback_schema()
     try:
         resp = re.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
@@ -155,20 +68,20 @@ def fetch_schema() -> SchemaResponse:
         missing = [k for k in required if k not in data]
         if missing:
             return SchemaResponse(
-                schema=DEFAULT_SCHEMA,
+                schema=fallback,
                 error=f"Schema missing fields: {', '.join(missing)}",
                 using_fallback=True,
             )
         return SchemaResponse(schema=data, error=None, using_fallback=False)
     except re.exceptions.ConnectionError:
         return SchemaResponse(
-            schema=DEFAULT_SCHEMA,
+            schema=fallback,
             error="Unable to connect to the prediction service to fetch schema.",
             using_fallback=True,
         )
     except re.exceptions.Timeout:
         return SchemaResponse(
-            schema=DEFAULT_SCHEMA,
+            schema=fallback,
             error="Schema request timed out.",
             using_fallback=True,
         )
@@ -179,19 +92,19 @@ def fetch_schema() -> SchemaResponse:
         except Exception:
             pass
         return SchemaResponse(
-            schema=DEFAULT_SCHEMA,
+            schema=fallback,
             error=f"Server returned error when fetching schema: {detail or str(e)}",
             using_fallback=True,
         )
     except ValueError:
         return SchemaResponse(
-            schema=DEFAULT_SCHEMA,
+            schema=fallback,
             error="Schema response was not valid JSON.",
             using_fallback=True,
         )
     except Exception as e:
         return SchemaResponse(
-            schema=DEFAULT_SCHEMA,
+            schema=fallback,
             error=f"Unexpected error fetching schema: {str(e)}",
             using_fallback=True,
         )
@@ -224,7 +137,7 @@ def predict_single(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[st
         return None, f"An unexpected error occurred: {str(e)}"
 
 
-def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = None) -> BatchResponse:
+def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = None) -> BatchTransportResponse:
     url = f"{API_BASE_URL.rstrip('/')}/predict_batch"
     try:
         payload = {"rows": rows}
@@ -242,7 +155,7 @@ def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = Non
                 error=r.get("error"),
                 field_errors=r.get("field_errors"),
             ))
-        return BatchResponse(
+        return BatchTransportResponse(
             results=results,
             success_count=body.get("success_count", 0),
             error_count=body.get("error_count", 0),
@@ -250,12 +163,12 @@ def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = Non
             transport_error=None,
         )
     except re.exceptions.ConnectionError:
-        return BatchResponse(
+        return BatchTransportResponse(
             results=[],
             transport_error="Unable to connect to the prediction service. Please check that the API server is running.",
         )
     except re.exceptions.Timeout:
-        return BatchResponse(
+        return BatchTransportResponse(
             results=[],
             transport_error="The batch prediction request timed out. Please try again later.",
         )
@@ -265,17 +178,17 @@ def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = Non
             detail = res.json().get("detail", "")
         except Exception:
             pass
-        return BatchResponse(
+        return BatchTransportResponse(
             results=[],
             transport_error=f"Server returned an error ({res.status_code}): {detail or str(e)}",
         )
     except ValueError:
-        return BatchResponse(
+        return BatchTransportResponse(
             results=[],
             transport_error="The server returned an invalid response. Please try again later.",
         )
     except Exception as e:
-        return BatchResponse(
+        return BatchTransportResponse(
             results=[],
             transport_error=f"An unexpected error occurred: {str(e)}",
         )

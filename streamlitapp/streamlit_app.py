@@ -5,17 +5,17 @@ from copy import deepcopy
 
 from api_client import (
     API_BASE_URL,
-    DEFAULT_SCHEMA,
-    BatchResponse,
-    BatchRowResult,
     SchemaResponse,
+    BatchTransportResponse,
+    BatchRowResult,
     fetch_schema,
     predict_batch,
     get_default_values,
     get_display_name,
     validate_values,
-    format_value_for_display,
+    format_value,
     get_api_base_url,
+    build_fallback_schema,
 )
 
 st.set_page_config(page_title="Car Price Comparison", layout="wide")
@@ -38,6 +38,8 @@ def init_session_state(schema: dict):
         st.session_state.global_error = None
     if "global_info" not in st.session_state:
         st.session_state.global_info = None
+    if "schema" not in st.session_state:
+        st.session_state.schema = schema
 
     if not st.session_state.scenario_ids:
         add_scenario(schema, name="Scenario 1")
@@ -120,7 +122,7 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
         cols = st.columns(n_cols)
         for i, field in enumerate(feature_order):
             with cols[i % n_cols]:
-                label = get_display_name(field)
+                label = get_display_name(field, schema)
                 has_warning = field in warnings
                 has_error = field in server_errors
                 warning_msg = warnings.get(field, "")
@@ -180,7 +182,7 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
                 err = result["error"]
                 fe = result.get("field_errors")
                 if fe:
-                    field_list = ", ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    field_list = ", ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
                     st.error(f"❌ {err} — {field_list}")
                 else:
                     st.error(f"❌ {err}")
@@ -232,11 +234,11 @@ def render_comparison_table(schema: dict):
             }
             for field in schema["feature_order"]:
                 val = st.session_state.scenario_values.get(sid, {}).get(field, "")
-                display_val = format_value_for_display(field, val, schema)
+                display_val = format_value(field, val, schema)
                 if field in differing_fields:
-                    row[get_display_name(field) + " 🔺"] = display_val
+                    row[get_display_name(field, schema) + " 🔺"] = display_val
                 else:
-                    row[get_display_name(field)] = display_val
+                    row[get_display_name(field, schema)] = display_val
             table_data.append(row)
 
         df = pd.DataFrame(table_data)
@@ -246,7 +248,7 @@ def render_comparison_table(schema: dict):
             st.info(
                 "🔺 Differing fields highlighted. "
                 f"{len(differing_fields)} field(s) vary across scenarios: "
-                + ", ".join(get_display_name(f) for f in differing_fields)
+                + ", ".join(get_display_name(f, schema) for f in differing_fields)
             )
 
         if failed:
@@ -256,7 +258,7 @@ def render_comparison_table(schema: dict):
                 fe = r.get("field_errors")
                 error_detail = r["error"]
                 if fe:
-                    field_list = "; ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    field_list = "; ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
                     error_detail = f"{error_detail} — {field_list}"
                 error_data.append({
                     "Scenario": st.session_state.scenario_names.get(sid, sid),
@@ -271,7 +273,7 @@ def render_comparison_table(schema: dict):
                 fe = r.get("field_errors")
                 error_detail = r["error"]
                 if fe:
-                    field_list = "; ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    field_list = "; ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
                     error_detail = f"{error_detail} — {field_list}"
                 error_data.append({
                     "Scenario": st.session_state.scenario_names.get(sid, sid),
@@ -314,7 +316,7 @@ def run_prediction_batch(schema: dict):
         row_ids.append(sid)
 
     with st.spinner(f"Running batch prediction for {len(rows)} scenario(s)..."):
-        batch_response: BatchResponse = predict_batch(rows=rows, row_ids=row_ids)
+        batch_response: BatchTransportResponse = predict_batch(rows=rows, row_ids=row_ids)
 
     if batch_response.transport_error:
         st.session_state.global_error = batch_response.transport_error
@@ -387,8 +389,7 @@ def main():
         schema = schema_resp.schema
 
     if schema is None:
-        st.error("Failed to load schema and no fallback available.")
-        return
+        schema = build_fallback_schema()
 
     init_session_state(schema)
 

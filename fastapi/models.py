@@ -5,9 +5,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from typing import List, Optional, Dict, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.prediction_protocol import BatchRowResult as _ProtocolBatchRowResult
+from car_pricing.prediction_protocol import BatchPredictionResponse as _ProtocolBatchPredictionResponse
 
 
 class CarPrediction(BaseModel):
@@ -57,15 +59,33 @@ class BatchPredictionRequest(BaseModel):
     row_ids: Optional[List[str]] = None
 
 
-class BatchRowResult(BaseModel):
+class BatchRowResultPydantic(BaseModel):
     row_id: Optional[str] = None
     prediction: Optional[float] = None
     error: Optional[str] = None
     field_errors: Optional[Dict[str, str]] = None
 
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolBatchRowResult) -> "BatchRowResultPydantic":
+        return cls(
+            row_id=proto.row_id,
+            prediction=proto.prediction,
+            error=proto.error,
+            field_errors=proto.field_errors,
+        )
 
-class BatchPredictionResponse(BaseModel):
-    results: List[BatchRowResult]
+
+class BatchPredictionResponsePydantic(BaseModel):
+    results: List[BatchRowResultPydantic]
     success_count: int
     error_count: int
     total_count: int
+
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolBatchPredictionResponse) -> "BatchPredictionResponsePydantic":
+        return cls(
+            results=[BatchRowResultPydantic.from_protocol(r) for r in proto.results],
+            success_count=proto.success_count,
+            error_count=proto.error_count,
+            total_count=proto.total_count,
+        )

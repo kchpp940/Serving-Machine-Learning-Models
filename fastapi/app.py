@@ -12,14 +12,14 @@ from models import (
     CarPrediction,
     PredictionResponse,
     BatchPredictionRequest,
-    BatchPredictionResponse,
-    BatchRowResult,
+    BatchPredictionResponsePydantic,
 )
 import numpy as np
 from typing import Dict, Any, List
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.prediction_protocol import BatchRowResult, BatchPredictionResponse
 
 
 app = FastAPI(
@@ -77,15 +77,7 @@ async def favicon():
 @app.get("/schema")
 async def get_schema():
     model = get_model()
-    return {
-        "feature_order": model.feature_order,
-        "numeric_features": model.numeric_features,
-        "categorical_features": model.categorical_features,
-        "target_column": model.target_column,
-        "categorical_options": {
-            f: model.categorical_options(f) for f in model.categorical_features
-        },
-    }
+    return model.schema.to_api_dict()
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -108,22 +100,22 @@ def _validate_and_predict_row(values: Dict[str, Any], model: CarPriceModel) -> B
     categorical_set = set(schema.categorical_features)
     categorical_options = {f: model.categorical_options(f) for f in schema.categorical_features}
 
-    for field in schema.feature_order:
-        if field not in values:
-            field_errors[field] = "Missing value"
+    for f in schema.feature_order:
+        if f not in values:
+            field_errors[f] = "Missing value"
             continue
-        val = values[field]
-        if field in numeric_set:
+        val = values[f]
+        if f in numeric_set:
             try:
                 float(val)
             except (ValueError, TypeError):
-                field_errors[field] = "Must be a number"
-        elif field in categorical_set:
-            opts = categorical_options.get(field, [])
+                field_errors[f] = "Must be a number"
+        elif f in categorical_set:
+            opts = categorical_options.get(f, [])
             if opts:
                 valid_values = {opt["form_value"] for opt in opts}
                 if val not in valid_values:
-                    field_errors[field] = f"Invalid option: {val}"
+                    field_errors[f] = f"Invalid option: {val}"
 
     if field_errors:
         return BatchRowResult(
@@ -153,7 +145,7 @@ def _validate_and_predict_row(values: Dict[str, Any], model: CarPriceModel) -> B
         )
 
 
-@app.post("/predict_batch", response_model=BatchPredictionResponse)
+@app.post("/predict_batch", response_model=BatchPredictionResponsePydantic)
 def predict_batch(request: BatchPredictionRequest):
     model = get_model()
     results: List[BatchRowResult] = []
@@ -167,9 +159,10 @@ def predict_batch(request: BatchPredictionRequest):
     success_count = sum(1 for r in results if r.prediction is not None)
     error_count = len(results) - success_count
 
-    return BatchPredictionResponse(
+    proto = BatchPredictionResponse(
         results=results,
         success_count=success_count,
         error_count=error_count,
         total_count=len(results),
     )
+    return BatchPredictionResponsePydantic.from_protocol(proto)
