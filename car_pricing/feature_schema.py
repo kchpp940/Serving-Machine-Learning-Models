@@ -69,27 +69,6 @@ FEATURE_DISPLAY_NAMES: Dict[str, str] = {
     "cylindernumber": "Cylinder Number",
 }
 
-PREDICTION_CURRENCY: str = "USD"
-
-EXPLAIN_TOP_FEATURES_DESCRIPTION: str = (
-    "Top N features ranked by model-level (global) feature importance. "
-    "These are global importance scores from the trained model, not per-sample SHAP-style contributions."
-)
-
-EXPLAIN_FEATURE_VALUES_DESCRIPTION: str = (
-    "Input feature values keyed by internal feature code. "
-    "Each entry carries the raw value, the feature display label, and a human-readable value string."
-)
-
-GLOBAL_IMPORTANCE_DESCRIPTION: str = (
-    "Model-level feature importance score (normalized, sum = 1). "
-    "This is a global property of the trained model, not a contribution specific to this input."
-)
-
-GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION: str = (
-    "Model-level feature importance expressed as a percentage (0-100)."
-)
-
 
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"

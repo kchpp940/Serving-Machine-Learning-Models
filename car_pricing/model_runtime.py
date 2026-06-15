@@ -12,7 +12,12 @@ from car_pricing.feature_schema import (
     TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
+)
+from car_pricing.prediction_protocol import (
     PREDICTION_CURRENCY,
+    ExplainResult,
+    GlobalFeatureImportance,
+    InputFeatureValue,
 )
 
 try:
@@ -193,7 +198,7 @@ class CarPriceModel:
             result[feature] = float(importances[i])
         return result
 
-    def explain_prediction(self, values: dict, top_k: int = 5) -> dict:
+    def explain_prediction(self, values: dict, top_k: int = 5) -> ExplainResult:
         if not self.supports_feature_importance:
             raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
 
@@ -202,36 +207,35 @@ class CarPriceModel:
 
         all_features = []
         for feature in self.feature_order:
-            raw_value = values.get(feature)
-            all_features.append({
-                "feature": feature,
-                "label": self.schema.label(feature),
-                "global_importance": importances[feature],
-                "global_importance_percent": round(importances[feature] * 100, 2),
-            })
+            all_features.append(GlobalFeatureImportance(
+                feature=feature,
+                label=self.schema.label(feature),
+                global_importance=importances[feature],
+                global_importance_percent=round(importances[feature] * 100, 2),
+            ))
 
-        all_features.sort(key=lambda x: x["global_importance"], reverse=True)
+        all_features.sort(key=lambda x: x.global_importance, reverse=True)
 
         top_features = all_features[:top_k] if top_k and top_k > 0 else all_features
 
         feature_values = {}
         for feature in self.feature_order:
             raw_value = values.get(feature)
-            feature_values[feature] = {
-                "value": raw_value,
-                "label": self.schema.label(feature),
-                "display": self.schema.display_value(feature, raw_value),
-            }
+            feature_values[feature] = InputFeatureValue(
+                value=raw_value,
+                label=self.schema.label(feature),
+                display=self.schema.display_value(feature, raw_value),
+            )
 
-        return {
-            "prediction": prediction,
-            "currency": PREDICTION_CURRENCY,
-            "model_name": self.model_name,
-            "top_features": top_features,
-            "feature_values": feature_values,
-        }
+        return ExplainResult(
+            prediction=prediction,
+            currency=PREDICTION_CURRENCY,
+            model_name=self.model_name,
+            top_features=top_features,
+            feature_values=feature_values,
+        )
 
-    def explain_from_pydantic(self, data, top_k: int = 5) -> dict:
+    def explain_from_pydantic(self, data, top_k: int = 5) -> ExplainResult:
         values = {f: getattr(data, f) for f in self.feature_order}
         return self.explain_prediction(values, top_k=top_k)
 

@@ -6,14 +6,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from pydantic import BaseModel, Field
 
-from car_pricing.feature_schema import (
-    FEATURE_ORDER,
-    CATEGORICAL_FEATURES,
+from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.prediction_protocol import (
     PREDICTION_CURRENCY,
-    EXPLAIN_TOP_FEATURES_DESCRIPTION,
-    EXPLAIN_FEATURE_VALUES_DESCRIPTION,
-    GLOBAL_IMPORTANCE_DESCRIPTION,
-    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
+    ExplainResult,
+    GlobalFeatureImportance as GlobalFeatureImportanceProto,
+    InputFeatureValue as InputFeatureValueProto,
 )
 
 
@@ -47,9 +45,9 @@ class CarPrediction(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    prediction: float = Field(description="Predicted car price")
-    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
-    model_name: str = Field(description="Name of the ML model that produced the prediction")
+    prediction: float = Field(description=ExplainResult.PREDICTION_DESCRIPTION)
+    currency: str = Field(default=PREDICTION_CURRENCY, description=ExplainResult.CURRENCY_DESCRIPTION)
+    model_name: str = Field(description=ExplainResult.MODEL_NAME_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -62,10 +60,10 @@ class PredictionResponse(BaseModel):
 
 
 class GlobalFeatureImportance(BaseModel):
-    feature: str = Field(description="Internal feature code name")
-    label: str = Field(description="Human-readable feature label from the shared feature schema")
-    global_importance: float = Field(description=GLOBAL_IMPORTANCE_DESCRIPTION)
-    global_importance_percent: float = Field(description=GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION)
+    feature: str = Field(description=GlobalFeatureImportanceProto.FEATURE_DESCRIPTION)
+    label: str = Field(description=GlobalFeatureImportanceProto.LABEL_DESCRIPTION)
+    global_importance: float = Field(description=GlobalFeatureImportanceProto.GLOBAL_IMPORTANCE_DESCRIPTION)
+    global_importance_percent: float = Field(description=GlobalFeatureImportanceProto.GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -79,9 +77,9 @@ class GlobalFeatureImportance(BaseModel):
 
 
 class InputFeatureValue(BaseModel):
-    value: Any = Field(description="Original input feature value")
-    label: str = Field(description="Human-readable feature label from the shared feature schema")
-    display: str = Field(description="Human-readable feature value representation")
+    value: Any = Field(description=InputFeatureValueProto.VALUE_DESCRIPTION)
+    label: str = Field(description=InputFeatureValueProto.LABEL_DESCRIPTION)
+    display: str = Field(description=InputFeatureValueProto.DISPLAY_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -94,11 +92,11 @@ class InputFeatureValue(BaseModel):
 
 
 class ExplainResponse(BaseModel):
-    prediction: float = Field(description="Predicted car price")
-    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
-    model_name: str = Field(description="Name of the ML model that produced the prediction")
-    top_features: List[GlobalFeatureImportance] = Field(description=EXPLAIN_TOP_FEATURES_DESCRIPTION)
-    feature_values: Dict[str, InputFeatureValue] = Field(description=EXPLAIN_FEATURE_VALUES_DESCRIPTION)
+    prediction: float = Field(description=ExplainResult.PREDICTION_DESCRIPTION)
+    currency: str = Field(default=PREDICTION_CURRENCY, description=ExplainResult.CURRENCY_DESCRIPTION)
+    model_name: str = Field(description=ExplainResult.MODEL_NAME_DESCRIPTION)
+    top_features: List[GlobalFeatureImportance] = Field(description=ExplainResult.TOP_FEATURES_DESCRIPTION)
+    feature_values: Dict[str, InputFeatureValue] = Field(description=ExplainResult.FEATURE_VALUES_DESCRIPTION)
 
     class Config:
         schema_extra = {

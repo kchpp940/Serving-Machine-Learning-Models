@@ -16,11 +16,12 @@ from models import (
 import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import (
-    FEATURE_ORDER,
+from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.prediction_protocol import (
     PREDICTION_CURRENCY,
     GLOBAL_IMPORTANCE_DESCRIPTION,
     GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
+    GlobalFeatureImportance,
 )
 
 
@@ -114,24 +115,21 @@ async def get_feature_importance():
                 detail=f"模型 {model.model_name} 不支持特征重要性",
             )
         importances = model.feature_importances()
-        sorted_features = sorted(
-            [
-                {
-                    "feature": f,
-                    "label": model.schema.label(f),
-                    "global_importance": score,
-                    "global_importance_percent": round(score * 100, 2),
-                }
-                for f, score in importances.items()
-            ],
-            key=lambda x: x["global_importance"],
-            reverse=True,
-        )
+        all_items = [
+            GlobalFeatureImportance(
+                feature=f,
+                label=model.schema.label(f),
+                global_importance=score,
+                global_importance_percent=round(score * 100, 2),
+            )
+            for f, score in importances.items()
+        ]
+        all_items.sort(key=lambda x: x.global_importance, reverse=True)
         return {
             "model_name": model.model_name,
             "global_importance_description": GLOBAL_IMPORTANCE_DESCRIPTION,
             "global_importance_percent_description": GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
-            "features": sorted_features,
+            "features": [item.to_dict() for item in all_items],
         }
     except HTTPException:
         raise
@@ -189,7 +187,7 @@ def explain_prediction(
             )
 
         result = model.explain_from_pydantic(data, top_k=top_k)
-        return ExplainResponse(**result)
+        return ExplainResponse(**result.to_dict())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
