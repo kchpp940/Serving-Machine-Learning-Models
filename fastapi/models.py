@@ -8,20 +8,23 @@ from pydantic import BaseModel, Field, create_model
 from car_pricing.feature_schema import FeatureSchema
 
 
-def build_car_prediction_model() -> type:
-    schema_dict = FeatureSchema.to_default_dict(include_encoders=False)
+def build_car_prediction_model(schema_dict: dict = None) -> type:
+    if schema_dict is None:
+        schema_dict = FeatureSchema.to_default_dict(include_encoders=False)
+
     feature_order = schema_dict["feature_order"]
     numeric_set = set(schema_dict["numeric_features"])
     default_values = schema_dict["default_values"]
+    display_names = schema_dict["display_names"]
 
     fields = {}
     for field_name in feature_order:
         if field_name in numeric_set:
             default_value = float(default_values[field_name])
-            fields[field_name] = (float, Field(default=default_value))
+            fields[field_name] = (float, Field(default=default_value, title=display_names[field_name]))
         else:
             default_value = str(default_values[field_name])
-            fields[field_name] = (str, Field(default=default_value))
+            fields[field_name] = (str, Field(default=default_value, title=display_names[field_name]))
 
     CarPrediction = create_model(
         "CarPrediction",

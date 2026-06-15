@@ -38,8 +38,9 @@ def get_model():
 @service.api(input=PandasDataFrame(), output=NumpyNdarray())
 def predict(df: pd.DataFrame) -> np.ndarray:
     model = get_model()
+    schema = model.to_schema_dict(include_encoders=False)
 
-    feature_order = model.feature_order
+    feature_order = schema["feature_order"]
     missing_cols = set(feature_order) - set(df.columns)
     if missing_cols:
         raise ValueError(f"输入数据缺少列: {missing_cols}")
