@@ -56,6 +56,19 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
     "rwd": "Rear Wheel Drive (RWD)",
 }
 
+FEATURE_DISPLAY_NAMES: Dict[str, str] = {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway MPG",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheelbase",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City MPG",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Cylinder Number",
+}
+
 
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"
@@ -226,6 +239,10 @@ class FeatureSchema:
             )
 
 
+def feature_display_name(field_name: str) -> str:
+    return FEATURE_DISPLAY_NAMES.get(field_name, field_name)
+
+
 def _display_name(field_name: str, raw_class: str) -> str:
     if field_name == "drivewheel":
         return DRIVEWheel_DISPLAY.get(raw_class, raw_class.upper())
@@ -235,6 +252,16 @@ def _display_name(field_name: str, raw_class: str) -> str:
             return f"{num} cylinders"
         return raw_class
     return raw_class
+
+
+def feature_value_display(field_name: str, value) -> str:
+    if field_name in CATEGORICAL_FEATURES:
+        return _display_name(field_name, str(value))
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.2f}"
+    return str(value)
 
 
 def load_training_data(csv_path: str) -> pd.DataFrame:

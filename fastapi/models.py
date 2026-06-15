@@ -1,34 +1,25 @@
 import sys
 import os
+from typing import List, Optional, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
-from car_pricing.prediction_protocol import (
-    DEFAULT_CURRENCY,
-    DEFAULT_MODEL_NAME,
-    DEFAULT_STATUS,
-    SINGLE_PREDICTION_FIELDS,
-    BATCH_ITEM_FIELDS,
-    BATCH_RESPONSE_FIELDS,
-)
 
 
 class CarPrediction(BaseModel):
-    enginesize: float
-    curbweight: float
-    horsepower: float
-    highwaympg: float
-    carwidth: float
-    wheelbase: float
-    drivewheel: str
-    citympg: float
-    boreratio: float
-    cylindernumber: str
+    enginesize: float = Field(description="Engine size in cubic centimeters", example=130)
+    curbweight: float = Field(description="Curb weight of the car in pounds", example=2548)
+    horsepower: float = Field(description="Horsepower output of the engine", example=111)
+    highwaympg: float = Field(description="Highway miles per gallon", example=27)
+    carwidth: float = Field(description="Width of the car in inches", example=64.1)
+    wheelbase: float = Field(description="Wheelbase distance in inches", example=88.6)
+    drivewheel: str = Field(description="Drive wheel type (fwd, rwd, 4wd)", example="rwd")
+    citympg: float = Field(description="City miles per gallon", example=21)
+    boreratio: float = Field(description="Engine bore ratio", example=3.47)
+    cylindernumber: str = Field(description="Number of cylinders (word format)", example="four")
 
     class Config:
         schema_extra = {
@@ -47,93 +38,105 @@ class CarPrediction(BaseModel):
         }
 
 
+class FeatureContribution(BaseModel):
+    rank: int = Field(description="Importance rank (1 = most important)")
+    feature_name: str = Field(description="Internal feature code name")
+    display_name: str = Field(description="Human-readable feature name")
+    feature_value: Any = Field(description="Original input feature value")
+    value_display: str = Field(description="Human-readable feature value")
+    importance: float = Field(description="Feature importance score (raw)")
+    importance_percent: float = Field(description="Feature importance as percentage")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "rank": 1,
+                "feature_name": "enginesize",
+                "display_name": "Engine Size",
+                "feature_value": 130,
+                "value_display": "130",
+                "importance": 0.6417,
+                "importance_percent": 64.17,
+            }
+        }
+
+
 class PredictionResponse(BaseModel):
-    prediction: float
-    currency: str = DEFAULT_CURRENCY
-    model_name: str = DEFAULT_MODEL_NAME
+    prediction: float = Field(description="Predicted car price")
+    status: str = Field(default="ok", description="Response status")
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "currency": DEFAULT_CURRENCY,
-                "model_name": "sklearn_gbr",
+                "status": "ok",
             }
         }
 
 
-class BatchPredictionRequest(BaseModel):
-    records: List[Dict[str, Any]]
+class PredictionWithExplanationResponse(PredictionResponse):
+    model_name: str = Field(description="Name of the ML model used")
+    top_features: List[FeatureContribution] = Field(description="Top N most important features for this prediction")
 
     class Config:
         schema_extra = {
             "example": {
-                "records": [
+                "prediction": 13295.27,
+                "status": "ok",
+                "model_name": "GradientBoostingRegressor",
+                "top_features": [
                     {
-                        "enginesize": 130,
-                        "curbweight": 2548,
-                        "horsepower": 111,
-                        "highwaympg": 27,
-                        "carwidth": 64.1,
-                        "wheelbase": 88.6,
-                        "drivewheel": "rwd",
-                        "citympg": 21,
-                        "boreratio": 3.47,
-                        "cylindernumber": "four",
+                        "rank": 1,
+                        "feature_name": "enginesize",
+                        "display_name": "Engine Size",
+                        "feature_value": 130,
+                        "value_display": "130",
+                        "importance": 0.6417,
+                        "importance_percent": 64.17,
                     },
                     {
-                        "enginesize": 152,
-                        "curbweight": 3086,
-                        "horsepower": 154,
-                        "highwaympg": 26,
-                        "carwidth": 66.3,
-                        "wheelbase": 99.8,
-                        "drivewheel": "fwd",
-                        "citympg": 19,
-                        "boreratio": 3.54,
-                        "cylindernumber": "six",
+                        "rank": 2,
+                        "feature_name": "curbweight",
+                        "display_name": "Curb Weight",
+                        "feature_value": 2548,
+                        "value_display": "2548",
+                        "importance": 0.1659,
+                        "importance_percent": 16.59,
                     },
-                ]
+                ],
             }
         }
 
 
-class BatchPredictionItem(BaseModel):
-    row_index: int
-    prediction: Optional[float] = None
-    currency: str = DEFAULT_CURRENCY
-    model_name: str = DEFAULT_MODEL_NAME
-    error: Optional[str] = None
-
-
-class BatchPredictionResponse(BaseModel):
-    status: str = DEFAULT_STATUS
-    total_records: int
-    valid_count: int
-    invalid_count: int
-    results: List[BatchPredictionItem]
+class ExplainResponse(PredictionWithExplanationResponse):
+    all_features: List[FeatureContribution] = Field(description="All features sorted by importance")
 
     class Config:
         schema_extra = {
             "example": {
-                "status": DEFAULT_STATUS,
-                "total_records": 2,
-                "valid_count": 2,
-                "invalid_count": 0,
-                "results": [
+                "prediction": 13295.27,
+                "status": "ok",
+                "model_name": "GradientBoostingRegressor",
+                "top_features": [
                     {
-                        "row_index": 0,
-                        "prediction": 13295.27,
-                        "currency": DEFAULT_CURRENCY,
-                        "model_name": "sklearn_gbr",
-                        "error": None,
+                        "rank": 1,
+                        "feature_name": "enginesize",
+                        "display_name": "Engine Size",
+                        "feature_value": 130,
+                        "value_display": "130",
+                        "importance": 0.6417,
+                        "importance_percent": 64.17,
                     },
+                ],
+                "all_features": [
                     {
-                        "row_index": 1,
-                        "prediction": 18945.63,
-                        "currency": DEFAULT_CURRENCY,
-                        "model_name": "sklearn_gbr",
-                        "error": None,
+                        "rank": 1,
+                        "feature_name": "enginesize",
+                        "display_name": "Engine Size",
+                        "feature_value": 130,
+                        "value_display": "130",
+                        "importance": 0.6417,
+                        "importance_percent": 64.17,
                     },
                 ],
             }

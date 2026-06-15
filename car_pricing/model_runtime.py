@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 
@@ -13,15 +12,8 @@ from car_pricing.feature_schema import (
     TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
-)
-from car_pricing.prediction_protocol import (
-    BatchProtocolItem,
-    BatchProtocolResponse,
-    build_batch_success_item,
-    build_batch_error_item,
-    build_batch_response,
-    DEFAULT_CURRENCY,
-    DEFAULT_MODEL_NAME,
+    feature_display_name,
+    feature_value_display,
 )
 
 try:
@@ -33,11 +25,6 @@ except ImportError:  # pragma: no cover
 _DEFAULT_FEATURE_ORDER_LEGACY = list(FEATURE_ORDER)
 _NUMERIC_FEATURE_SET = set(NUMERIC_FEATURES)
 _CATEGORICAL_FEATURE_SET = set(CATEGORICAL_FEATURES)
-
-
-# ---------- 向后兼容别名（旧代码仍能 import）----------
-BatchPredictionItem = BatchProtocolItem
-BatchPredictionResult = BatchProtocolResponse
 
 
 def _is_legacy_bundle(obj) -> bool:
@@ -165,42 +152,6 @@ class CarPriceModel:
     def encode_dict(self, values: dict) -> dict:
         return self.schema.encode_dict(values)
 
-    # ---------- 校验 ----------
-
-    def validate_record(self, record: dict) -> Optional[str]:
-        """校验单条记录，返回错误信息字符串；通过返回 None。"""
-        required = set(self.feature_order)
-        missing = required - set(record.keys())
-        if missing:
-            return f"缺少字段: {', '.join(sorted(missing))}"
-
-        row_errors = []
-        for field in self.feature_order:
-            try:
-                self.encode_feature(field, record[field])
-            except (ValueError, TypeError) as e:
-                row_errors.append(f"{field}: {str(e)}")
-
-        if row_errors:
-            return "; ".join(row_errors)
-        return None
-
-    def validate_records(self, records: list) -> Tuple[List[int], List[Dict[str, Any]]]:
-        """批量校验记录列表。
-
-        返回 (有效索引列表, 错误项列表)。
-        错误项格式: {"row_index": int, "error": str}
-        """
-        valid_indices = []
-        errors = []
-        for idx, record in enumerate(records):
-            err = self.validate_record(record)
-            if err is None:
-                valid_indices.append(idx)
-            else:
-                errors.append({"row_index": idx, "error": err})
-        return valid_indices, errors
-
     # ---------- 推理 ----------
 
     def _vector_from_encoded(self, encoded: dict) -> np.ndarray:
@@ -218,45 +169,65 @@ class CarPriceModel:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
 
-    def predict_records(self, records: list) -> BatchProtocolResponse:
-        """批量预测记录列表，返回带行号和错误信息的结果。"""
-        feature_order = self.feature_order
-        results: List[BatchProtocolItem] = []
-        valid_rows: List[dict] = []
-        valid_indices: List[int] = []
-
-        for idx, record in enumerate(records):
-            err = self.validate_record(record)
-            if err is not None:
-                results.append(build_batch_error_item(
-                    idx,
-                    err,
-                    currency=DEFAULT_CURRENCY,
-                    model_name=DEFAULT_MODEL_NAME,
-                ))
-                continue
-            valid_rows.append({f: record[f] for f in feature_order})
-            valid_indices.append(idx)
-
-        if valid_rows:
-            df = pd.DataFrame(valid_rows)
-            predictions = self.predict_dataframe(df)
-            for idx, pred in zip(valid_indices, predictions):
-                results.append(build_batch_success_item(
-                    idx,
-                    float(pred),
-                    currency=DEFAULT_CURRENCY,
-                    model_name=DEFAULT_MODEL_NAME,
-                ))
-
-        results.sort(key=lambda x: x.row_index)
-        return build_batch_response(results)
-
     # ---------- FastAPI 兼容层 ----------
 
     def predict_from_pydantic(self, data) -> np.ndarray:
         encoded = {f: self.encode_feature(f, getattr(data, f)) for f in self.feature_order}
         return self.predict_encoded(encoded)
+
+    # ---------- 模型解释 ----------
+
+    @property
+    def supports_feature_importance(self) -> bool:
+        return hasattr(self.model, "feature_importances_")
+
+    @property
+    def model_name(self) -> str:
+        return type(self.model).__name__
+
+    def feature_importances(self) -> dict:
+        if not self.supports_feature_importance:
+            raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
+        importances = self.model.feature_importances_
+        result = {}
+        for i, feature in enumerate(self.feature_order):
+            result[feature] = float(importances[i])
+        return result
+
+    def explain_prediction(self, values: dict, top_k: int = 5) -> dict:
+        if not self.supports_feature_importance:
+            raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
+
+        importances = self.feature_importances()
+
+        features = []
+        for feature in self.feature_order:
+            raw_value = values.get(feature)
+            features.append({
+                "feature_name": feature,
+                "display_name": feature_display_name(feature),
+                "feature_value": raw_value,
+                "value_display": feature_value_display(feature, raw_value),
+                "importance": importances[feature],
+                "importance_percent": round(importances[feature] * 100, 2),
+            })
+
+        features.sort(key=lambda x: x["importance"], reverse=True)
+
+        for i, f in enumerate(features):
+            f["rank"] = i + 1
+
+        top_features = features[:top_k] if top_k and top_k > 0 else features
+
+        return {
+            "model_name": self.model_name,
+            "top_features": top_features,
+            "all_features": features,
+        }
+
+    def explain_from_pydantic(self, data, top_k: int = 5) -> dict:
+        values = {f: getattr(data, f) for f in self.feature_order}
+        return self.explain_prediction(values, top_k=top_k)
 
     # ---------- 导出 bundle ----------
 

@@ -5,23 +5,33 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pandas as pd
 import joblib
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi import HTTPException
-from models import CarPrediction, PredictionResponse, BatchPredictionRequest, BatchPredictionResponse, BatchPredictionItem
+from models import (
+    CarPrediction,
+    PredictionResponse,
+    PredictionWithExplanationResponse,
+    ExplainResponse,
+)
 import numpy as np
+from typing import Union
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 
 
-MODEL_NAME = "sklearn_gbr"
-MODEL_CURRENCY = "USD"
-
 app = FastAPI(
     title="Car Price Prediction API",
-    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.""",
-    version="0.0.1",
+    description="""An API that utilises a Machine Learning model to predict the price of a given car make and model based on various features.
+
+## Features
+
+- **Predict**: Get car price predictions based on vehicle features
+- **Explain**: Understand which features most influence the prediction
+- **Schema**: Query available features and their options
+""",
+    version="0.1.0",
     debug=True,
 )
 
@@ -47,6 +57,7 @@ async def startup_event():
         print(f"Feature order: {model.feature_order}")
         print(f"Expected features: {model.schema.n_features()}")
         print(f"Model n_features_in_: {model.model.n_features_in_}")
+        print(f"Supports feature importance: {model.supports_feature_importance}")
     except Exception as e:
         print(f"Failed to load model on startup: {e}")
         raise
@@ -70,7 +81,7 @@ async def favicon():
     return FileResponse(favicon_path)
 
 
-@app.get("/schema")
+@app.get("/schema", summary="Get feature schema and options")
 async def get_schema():
     model = get_model()
     return {
@@ -81,47 +92,126 @@ async def get_schema():
         "categorical_options": {
             f: model.categorical_options(f) for f in model.categorical_features
         },
+        "model_name": model.model_name,
+        "supports_feature_importance": model.supports_feature_importance,
     }
 
 
-@app.post("/predict", response_model=PredictionResponse)
-def predict(data: CarPrediction):
+@app.get("/feature_importance", summary="Get global feature importance")
+async def get_feature_importance():
+    try:
+        model = get_model()
+        if not model.supports_feature_importance:
+            raise HTTPException(
+                status_code=501,
+                detail=f"模型 {model.model_name} 不支持特征重要性",
+            )
+        importances = model.feature_importances()
+        sorted_features = sorted(
+            [
+                {
+                    "feature_name": f,
+                    "importance": score,
+                    "importance_percent": round(score * 100, 2),
+                }
+                for f, score in importances.items()
+            ],
+            key=lambda x: x["importance"],
+            reverse=True,
+        )
+        return {
+            "model_name": model.model_name,
+            "features": sorted_features,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取特征重要性失败: {str(e)}")
+
+
+@app.post(
+    "/predict",
+    response_model=Union[PredictionResponse, PredictionWithExplanationResponse],
+    summary="Predict car price",
+    response_description="Predicted car price, optionally with feature explanation",
+)
+def predict(
+    data: CarPrediction,
+    explain: bool = Query(
+        default=False,
+        description="Whether to include feature importance explanation with the prediction",
+    ),
+    top_k: int = Query(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of top features to return when explain is enabled",
+    ),
+):
     try:
         model = get_model()
         predictions = model.predict_from_pydantic(data)
         value = float(predictions[0])
-        return PredictionResponse(
+
+        if not explain:
+            return PredictionResponse(prediction=value)
+
+        if not model.supports_feature_importance:
+            raise HTTPException(
+                status_code=501,
+                detail=f"模型 {model.model_name} 不支持特征重要性解释",
+            )
+
+        explanation = model.explain_from_pydantic(data, top_k=top_k)
+        return PredictionWithExplanationResponse(
             prediction=value,
-            currency=MODEL_CURRENCY,
-            model_name=MODEL_NAME,
+            model_name=explanation["model_name"],
+            top_features=explanation["top_features"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
 
 
-@app.post("/predict_batch", response_model=BatchPredictionResponse)
-def predict_batch(request: BatchPredictionRequest):
+@app.post(
+    "/explain",
+    response_model=ExplainResponse,
+    summary="Explain a car price prediction",
+    response_description="Detailed prediction explanation with feature contributions",
+)
+def explain_prediction(
+    data: CarPrediction,
+    top_k: int = Query(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of top features to highlight",
+    ),
+):
     try:
         model = get_model()
-        batch_result = model.predict_records(request.records)
+        if not model.supports_feature_importance:
+            raise HTTPException(
+                status_code=501,
+                detail=f"模型 {model.model_name} 不支持特征重要性解释",
+            )
 
-        results = []
-        for item in batch_result.results:
-            results.append(BatchPredictionItem(
-                row_index=item.row_index,
-                prediction=item.prediction,
-                currency=MODEL_CURRENCY,
-                model_name=MODEL_NAME,
-                error=item.error,
-            ))
+        predictions = model.predict_from_pydantic(data)
+        value = float(predictions[0])
+        explanation = model.explain_from_pydantic(data, top_k=top_k)
 
-        return BatchPredictionResponse(
-            total_records=batch_result.total_records,
-            valid_count=batch_result.valid_count,
-            invalid_count=batch_result.invalid_count,
-            results=results,
+        return ExplainResponse(
+            prediction=value,
+            model_name=explanation["model_name"],
+            top_features=explanation["top_features"],
+            all_features=explanation["all_features"],
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"批量预测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"解释失败: {str(e)}")
