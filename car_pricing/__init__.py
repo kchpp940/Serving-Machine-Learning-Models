@@ -8,27 +8,9 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
     is_model_bundle,
-    default_schema,
-    default_schema_dict,
-    field_display_names,
 )
 
 from car_pricing.model_runtime import CarPriceModel
-
-from car_pricing.api_client import (
-    ServiceType,
-    ErrorCategory,
-    ServiceError,
-    BasePredictionClient,
-    FastAPIClient,
-    BentoMLClient,
-    create_client,
-    DEFAULT_TIMEOUT,
-    DEFAULT_FASTAPI_BASE_URL,
-    DEFAULT_BENTOML_BASE_URL,
-    DEFAULT_SCHEMA,
-    FIELD_DISPLAY_NAMES,
-)
 
 __all__ = [
     "FeatureSchema",
@@ -40,20 +22,5 @@ __all__ = [
     "prepare_training_data",
     "bundle_model",
     "is_model_bundle",
-    "default_schema",
-    "default_schema_dict",
-    "field_display_names",
     "CarPriceModel",
-    "ServiceType",
-    "ErrorCategory",
-    "ServiceError",
-    "BasePredictionClient",
-    "FastAPIClient",
-    "BentoMLClient",
-    "create_client",
-    "DEFAULT_TIMEOUT",
-    "DEFAULT_FASTAPI_BASE_URL",
-    "DEFAULT_BENTOML_BASE_URL",
-    "DEFAULT_SCHEMA",
-    "FIELD_DISPLAY_NAMES",
 ]

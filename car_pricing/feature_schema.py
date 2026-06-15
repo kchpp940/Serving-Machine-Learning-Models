@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
+import hashlib
+import json
 import numpy as np
 import pandas as pd
 
@@ -56,8 +58,7 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
     "rwd": "Rear Wheel Drive (RWD)",
 }
 
-
-FIELD_DISPLAY_NAME_MAP: Dict[str, str] = {
+FIELD_DISPLAY_NAMES: Dict[str, str] = {
     "enginesize": "Engine Size",
     "curbweight": "Curb Weight",
     "horsepower": "Horsepower",
@@ -70,50 +71,33 @@ FIELD_DISPLAY_NAME_MAP: Dict[str, str] = {
     "cylindernumber": "Number of Cylinders",
 }
 
-
-def _default_categorical_encoders():
-    if LabelEncoder is None:
-        return {}
-    import numpy as np
-    encoders = {}
-    legacy_classes = {
-        "drivewheel": np.array(["4wd", "fwd", "rwd"]),
-        "cylindernumber": np.array(
-            ["eight", "five", "four", "six", "three", "twelve", "two"]
-        ),
-    }
-    for col, classes in legacy_classes.items():
-        lb = LabelEncoder()
-        lb.fit(classes.astype(str))
-        encoders[col] = lb
-    return encoders
-
-
-def default_schema() -> "FeatureSchema":
-    schema = FeatureSchema()
-    schema.categorical_encoders = _default_categorical_encoders()
-    return schema
-
-
-def default_schema_dict() -> Dict[str, Any]:
-    schema = default_schema()
-    return {
-        "feature_order": list(schema.feature_order),
-        "numeric_features": list(schema.numeric_features),
-        "categorical_features": list(schema.categorical_features),
-        "target_column": schema.target_column,
-        "categorical_options": {
-            f: schema.categorical_options(f) for f in schema.categorical_features
-        },
-    }
-
-
-def field_display_names() -> Dict[str, str]:
-    return dict(FIELD_DISPLAY_NAME_MAP)
+FIELD_DEFAULT_VALUES: Dict[str, Any] = {
+    "enginesize": 130.0,
+    "curbweight": 2548.0,
+    "horsepower": 111.0,
+    "highwaympg": 27.0,
+    "carwidth": 64.1,
+    "wheelbase": 88.6,
+    "drivewheel": "fwd",
+    "citympg": 21.0,
+    "boreratio": 3.47,
+    "cylindernumber": "four",
+}
 
 
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"
+
+
+def _display_name(field_name: str, raw_class: str) -> str:
+    if field_name == "drivewheel":
+        return DRIVEWheel_DISPLAY.get(raw_class, raw_class.upper())
+    if field_name == "cylindernumber":
+        num = WORD_TO_NUM_CYLINDERS.get(raw_class.lower())
+        if num is not None:
+            return f"{num} cylinders"
+        return raw_class
+    return raw_class
 
 
 @dataclass
@@ -123,6 +107,9 @@ class FeatureSchema:
     categorical_features: List[str] = field(default_factory=lambda: list(CATEGORICAL_FEATURES))
     target_column: str = TARGET_COLUMN
     categorical_encoders: Dict[str, "LabelEncoder"] = field(default_factory=dict)
+    display_names: Dict[str, str] = field(default_factory=lambda: dict(FIELD_DISPLAY_NAMES))
+    default_values: Dict[str, Any] = field(default_factory=lambda: dict(FIELD_DEFAULT_VALUES))
+    data_version: Optional[str] = None
 
     def validate(self) -> None:
         for f in self.numeric_features:
@@ -140,6 +127,16 @@ class FeatureSchema:
 
     def n_features(self) -> int:
         return len(self.feature_order)
+
+    def field_display_name(self, field_name: str) -> str:
+        if field_name not in self.feature_order:
+            raise ValueError(f"未知字段: {field_name}")
+        return self.display_names.get(field_name, field_name.replace("_", " ").title())
+
+    def field_default_value(self, field_name: str) -> Any:
+        if field_name not in self.feature_order:
+            raise ValueError(f"未知字段: {field_name}")
+        return self.default_values.get(field_name, 0.0 if field_name in self.numeric_features else "")
 
     def fit_encoders(self, df: pd.DataFrame) -> None:
         if LabelEncoder is None:
@@ -241,19 +238,48 @@ class FeatureSchema:
             })
         return options
 
-    def to_dict(self) -> dict:
-        encoder_data = {}
-        for col, le in self.categorical_encoders.items():
-            encoder_data[col] = {
-                "classes": list(le.classes_),
-            }
-        return {
+    def schema_version(self) -> str:
+        signature = {
+            "feature_order": self.feature_order,
+            "numeric_features": self.numeric_features,
+            "categorical_features": self.categorical_features,
+            "target_column": self.target_column,
+            "display_names": {f: self.field_display_name(f) for f in self.feature_order},
+            "categorical_options": {},
+        }
+        for f in self.categorical_features:
+            if f in self.categorical_encoders:
+                signature["categorical_options"][f] = [
+                    opt["form_value"] for opt in self.categorical_options(f)
+                ]
+            else:
+                signature["categorical_options"][f] = []
+        raw = json.dumps(signature, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+    def to_dict(self, include_encoders: bool = True) -> dict:
+        result = {
             "feature_order": list(self.feature_order),
             "numeric_features": list(self.numeric_features),
             "categorical_features": list(self.categorical_features),
             "target_column": self.target_column,
-            "categorical_encoders": encoder_data,
+            "display_names": {f: self.field_display_name(f) for f in self.feature_order},
+            "default_values": {f: self.field_default_value(f) for f in self.feature_order},
+            "schema_version": self.schema_version(),
         }
+        if self.data_version is not None:
+            result["data_version"] = self.data_version
+        if include_encoders:
+            encoder_data = {}
+            for col, le in self.categorical_encoders.items():
+                encoder_data[col] = {
+                    "classes": list(le.classes_),
+                }
+            result["categorical_encoders"] = encoder_data
+            result["categorical_options"] = {
+                f: self.categorical_options(f) for f in self.categorical_features
+            }
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "FeatureSchema":
@@ -264,6 +290,9 @@ class FeatureSchema:
             numeric_features=list(data.get("numeric_features", NUMERIC_FEATURES)),
             categorical_features=list(data.get("categorical_features", CATEGORICAL_FEATURES)),
             target_column=data.get("target_column", TARGET_COLUMN),
+            display_names=dict(data.get("display_names", FIELD_DISPLAY_NAMES)),
+            default_values=dict(data.get("default_values", FIELD_DEFAULT_VALUES)),
+            data_version=data.get("data_version", None),
         )
         encoders = {}
         for col, enc_data in data.get("categorical_encoders", {}).items():
@@ -280,30 +309,24 @@ class FeatureSchema:
                 f"模型期望 n_features_in_={n_features} 但 schema 有 {self.n_features()} 个特征"
             )
 
-
-def _display_name(field_name: str, raw_class: str) -> str:
-    if field_name == "drivewheel":
-        return DRIVEWheel_DISPLAY.get(raw_class, raw_class.upper())
-    if field_name == "cylindernumber":
-        num = WORD_TO_NUM_CYLINDERS.get(raw_class.lower())
-        if num is not None:
-            return f"{num} cylinders"
-        return raw_class
-    return raw_class
+    @classmethod
+    def default(cls) -> "FeatureSchema":
+        return cls()
 
 
 def load_training_data(csv_path: str) -> pd.DataFrame:
-    usecols = FEATURE_ORDER + [TARGET_COLUMN]
+    schema = FeatureSchema.default()
+    usecols = schema.feature_order + [schema.target_column]
     df = pd.read_csv(csv_path, usecols=usecols)
     return df
 
 
 def prepare_training_data(df: pd.DataFrame) -> tuple:
-    schema = FeatureSchema()
+    schema = FeatureSchema.default()
     schema.fit_encoders(df)
     encoded_df = schema.encode_dataframe(df)
     X = encoded_df[schema.feature_order]
-    y = df[TARGET_COLUMN]
+    y = df[schema.target_column]
     return X, y, schema
 
 

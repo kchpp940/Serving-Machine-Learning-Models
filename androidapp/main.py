@@ -1,17 +1,12 @@
 import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from kivymd.app import MDApp
 from kivy.lang.builder import Builder
 from kivy.uix.screenmanager import Screen, ScreenManager
 import certifi as cfi
+import requests as re
 
-from car_pricing.api_client import (
-    create_client,
-    ServiceError,
-)
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 
 Builder_string = """
@@ -163,7 +158,6 @@ sm.add_widget(Main(name="main"))
 class MainApp(MDApp):
     def build(self):
         self.help_string = Builder.load_string(Builder_string)
-        self._client = create_client(verify_ssl=cfi.where())
         return self.help_string
 
     def predict(self):
@@ -189,16 +183,30 @@ class MainApp(MDApp):
             "boreratio": boreratio,
             "cylindernumber": cylindernumber
         }
+        url = f"{API_BASE_URL.rstrip('/')}/predict"
         output = self.help_string.get_screen("main").ids.output_text
         try:
-            body = self._client.predict(values)
+            resp = re.post(url=url, json=values, timeout=REQUEST_TIMEOUT, verify=cfi.where())
+            resp.raise_for_status()
+            body = resp.json()
             prediction = body.get("prediction")
             if prediction is None:
                 output.text = f"Error: unexpected response from server"
             else:
                 output.text = f"Predicted Price: {prediction:.2f}$"
-        except ServiceError as e:
-            output.text = f"Error: {e.message}"
+        except re.exceptions.ConnectionError:
+            output.text = "Error: cannot connect to prediction service"
+        except re.exceptions.Timeout:
+            output.text = "Error: request timed out, please try again"
+        except re.exceptions.HTTPError:
+            detail = ""
+            try:
+                detail = resp.json().get("detail", "")
+            except Exception:
+                pass
+            output.text = f"Server error: {detail or 'unknown error'}"
+        except ValueError:
+            output.text = "Error: invalid response from server"
         except Exception as e:
             output.text = f"Error: {str(e)}"
 

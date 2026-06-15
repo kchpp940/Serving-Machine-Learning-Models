@@ -7,7 +7,6 @@ import joblib
 import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import FEATURE_ORDER
 
 
 _model = None
@@ -26,29 +25,6 @@ def _get_model():
     return _model
 
 
-def predict_price(
-    enginesize,
-    curbweight,
-    horsepower,
-    highwaympg,
-    carwidth,
-    wheelbase,
-    drivewheel,
-    citympg,
-    boreratio,
-    cylindernumber,
-):
+def predict_price(values: dict):
     model = _get_model()
-    values = {
-        "enginesize": enginesize,
-        "curbweight": curbweight,
-        "horsepower": horsepower,
-        "highwaympg": highwaympg,
-        "carwidth": carwidth,
-        "wheelbase": wheelbase,
-        "drivewheel": drivewheel,
-        "citympg": citympg,
-        "boreratio": boreratio,
-        "cylindernumber": cylindernumber,
-    }
     return model.predict_raw(values)

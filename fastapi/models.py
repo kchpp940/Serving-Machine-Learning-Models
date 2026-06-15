@@ -3,40 +3,42 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, create_model
 
-from pydantic import BaseModel, Field
-
-from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.feature_schema import FeatureSchema
 
 
-class CarPrediction(BaseModel):
-    enginesize: float
-    curbweight: float
-    horsepower: float
-    highwaympg: float
-    carwidth: float
-    wheelbase: float
-    drivewheel: str
-    citympg: float
-    boreratio: float
-    cylindernumber: str
+def build_car_prediction_model() -> type:
+    schema = FeatureSchema.default()
+    fields = {}
+    for field_name in schema.feature_order:
+        if field_name in schema.numeric_features:
+            default_value = float(schema.field_default_value(field_name))
+            fields[field_name] = (float, Field(default=default_value))
+        else:
+            default_value = str(schema.field_default_value(field_name))
+            fields[field_name] = (str, Field(default=default_value))
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "enginesize": 130,
-                "curbweight": 2548,
-                "horsepower": 111,
-                "highwaympg": 27,
-                "carwidth": 64.1,
-                "wheelbase": 88.6,
-                "drivewheel": "rwd",
-                "citympg": 21,
-                "boreratio": 3.47,
-                "cylindernumber": "four",
-            }
-        }
+    CarPrediction = create_model(
+        "CarPrediction",
+        **fields,
+    )
+
+    example = {f: schema.field_default_value(f) for f in schema.feature_order}
+    CarPrediction.__doc__ = "汽车价格预测输入"
+
+    original_schema = CarPrediction.schema
+
+    def custom_schema(*args, **kwargs):
+        s = original_schema(*args, **kwargs)
+        s["example"] = example
+        return s
+
+    CarPrediction.schema = classmethod(custom_schema)
+    return CarPrediction
+
+
+CarPrediction = build_car_prediction_model()
 
 
 class PredictionResponse(BaseModel):
@@ -48,52 +50,5 @@ class PredictionResponse(BaseModel):
             "example": {
                 "prediction": 13295.27,
                 "status": "ok",
-            }
-        }
-
-
-class BatchPredictionRequest(BaseModel):
-    rows: List[CarPrediction]
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "rows": [
-                    {
-                        "enginesize": 130,
-                        "curbweight": 2548,
-                        "horsepower": 111,
-                        "highwaympg": 27,
-                        "carwidth": 64.1,
-                        "wheelbase": 88.6,
-                        "drivewheel": "rwd",
-                        "citympg": 21,
-                        "boreratio": 3.47,
-                        "cylindernumber": "four",
-                    },
-                    {
-                        "enginesize": 150,
-                        "curbweight": 2800,
-                        "horsepower": 130,
-                        "highwaympg": 25,
-                        "carwidth": 66.0,
-                        "wheelbase": 95.0,
-                        "drivewheel": "fwd",
-                        "citympg": 19,
-                        "boreratio": 3.60,
-                        "cylindernumber": "six",
-                    },
-                ]
-            }
-        }
-
-
-class BatchPredictionResponse(BaseModel):
-    predictions: List[float]
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "predictions": [13295.27, 18500.50],
             }
         }
