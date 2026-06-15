@@ -59,6 +59,19 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
 }
 
 
+SCHEMA_FORMAT_VERSION: str = "1"
+
+
+SCHEMA_VERSION_FIELDS: List[str] = [
+    "format_version",
+    "feature_order",
+    "numeric_features",
+    "categorical_features",
+    "target_column",
+    "categorical_encoders",
+]
+
+
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"
 
@@ -195,6 +208,7 @@ class FeatureSchema:
                 "classes": list(le.classes_),
             }
         return {
+            "format_version": SCHEMA_FORMAT_VERSION,
             "feature_order": list(self.feature_order),
             "numeric_features": list(self.numeric_features),
             "categorical_features": list(self.categorical_features),
@@ -263,9 +277,40 @@ def bundle_model(model, schema: FeatureSchema) -> dict:
 
 
 def compute_schema_version(schema) -> str:
-    schema_dict = schema.to_dict()
-    schema_str = json.dumps(schema_dict, sort_keys=True)
-    return hashlib.md5(schema_str.encode()).hexdigest()[:12]
+    """Compute the version hash of a FeatureSchema.
+
+    Only fields in SCHEMA_VERSION_FIELDS are included in the hash,
+    ensuring the version calculation does not include the version field itself
+    (no self-reference) and that all consumers use the exact same algorithm.
+
+    Args:
+        schema: A FeatureSchema instance or a dict with compatible structure.
+
+    Returns:
+        12-character hex MD5 hash string.
+    """
+    if isinstance(schema, FeatureSchema):
+        schema_dict = schema.to_dict()
+    elif isinstance(schema, dict):
+        schema_dict = schema
+    else:
+        raise TypeError(
+            f"compute_schema_version expects FeatureSchema or dict, got {type(schema).__name__}"
+        )
+
+    version_input = {}
+    for field in SCHEMA_VERSION_FIELDS:
+        if field in schema_dict:
+            version_input[field] = schema_dict[field]
+        elif field == "format_version":
+            version_input[field] = SCHEMA_FORMAT_VERSION
+
+    if "schema_version" in version_input:
+        del version_input["schema_version"]
+
+    version_input_str = json.dumps(version_input, sort_keys=True)
+    return hashlib.md5(version_input_str.encode()).hexdigest()[:12]
+
 
 def is_model_bundle(obj) -> bool:
     return isinstance(obj, dict) and "model" in obj and "schema" in obj

@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/fdded4cead9a4640b6132aa8afb66baa/artifacts
+end_time: 1781499217755
+entry_point_name: ''
+experiment_id: '692173100610254648'
+lifecycle_stage: active
+run_id: fdded4cead9a4640b6132aa8afb66baa
+run_name: GradientBoosting
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1781499210096
+status: 3
+tags: []
+user_id: pkcha
