@@ -14,10 +14,14 @@ from models import (
     ExplainResponse,
 )
 import numpy as np
-from typing import Union
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.feature_schema import (
+    FEATURE_ORDER,
+    PREDICTION_CURRENCY,
+    GLOBAL_IMPORTANCE_DESCRIPTION,
+    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
+)
 
 
 app = FastAPI(
@@ -26,11 +30,13 @@ app = FastAPI(
 
 ## Features
 
-- **Predict**: Get car price predictions based on vehicle features
-- **Explain**: Understand which features most influence the prediction
-- **Schema**: Query available features and their options
+- **Predict** (`/predict`): Get stable canonical car price predictions
+- **Explain** (`/explain`): Get a prediction together with model-level (global) feature importance and input feature values.
+  **Important**: `top_features` reports *global feature importance* from the trained model,
+  not per-sample contributions such as SHAP values.
+- **Schema** (`/schema`): Query available features, their labels, and categorical options
 """,
-    version="0.1.0",
+    version="0.2.0",
     debug=True,
 )
 
@@ -92,6 +98,7 @@ async def get_schema():
         "categorical_options": {
             f: model.categorical_options(f) for f in model.categorical_features
         },
+        "prediction_currency": PREDICTION_CURRENCY,
         "model_name": model.model_name,
         "supports_feature_importance": model.supports_feature_importance,
     }
@@ -122,6 +129,8 @@ async def get_feature_importance():
         )
         return {
             "model_name": model.model_name,
+            "global_importance_description": GLOBAL_IMPORTANCE_DESCRIPTION,
+            "global_importance_percent_description": GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
             "features": sorted_features,
         }
     except HTTPException:
@@ -132,48 +141,22 @@ async def get_feature_importance():
 
 @app.post(
     "/predict",
-    response_model=Union[PredictionResponse, ExplainResponse],
+    response_model=PredictionResponse,
     summary="Predict car price",
-    response_description="Predicted car price, optionally with feature explanation",
+    response_description="Canonical prediction with currency and model identifier. Response shape is stable and does not change.",
 )
-def predict(
-    data: CarPrediction,
-    explain: bool = Query(
-        default=False,
-        description="Whether to include feature importance explanation with the prediction",
-    ),
-    top_k: int = Query(
-        default=5,
-        ge=1,
-        le=20,
-        description="Number of top features to return when explain is enabled",
-    ),
-):
+def predict(data: CarPrediction):
     try:
         model = get_model()
         predictions = model.predict_from_pydantic(data)
         value = float(predictions[0])
-
-        if not explain:
-            return PredictionResponse(prediction=value)
-
-        if not model.supports_feature_importance:
-            raise HTTPException(
-                status_code=501,
-                detail=f"模型 {model.model_name} 不支持特征重要性解释",
-            )
-
-        explanation = model.explain_from_pydantic(data, top_k=top_k)
-        return ExplainResponse(
+        return PredictionResponse(
             prediction=value,
-            model_name=explanation["model_name"],
-            top_features=explanation["top_features"],
-            feature_values=explanation["feature_values"],
+            currency=PREDICTION_CURRENCY,
+            model_name=model.model_name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
 
@@ -182,7 +165,11 @@ def predict(
     "/explain",
     response_model=ExplainResponse,
     summary="Explain a car price prediction",
-    response_description="Prediction with global feature importance and input feature values",
+    response_description=(
+        "Prediction together with input feature values and top features ranked by "
+        "model-level (global) importance. The ranking is a global property of the "
+        "trained model and is not a per-sample contribution."
+    ),
 )
 def explain_prediction(
     data: CarPrediction,
@@ -190,7 +177,7 @@ def explain_prediction(
         default=5,
         ge=1,
         le=20,
-        description="Number of top features to highlight",
+        description="Number of top features to return, ranked by global importance",
     ),
 ):
     try:
@@ -201,16 +188,8 @@ def explain_prediction(
                 detail=f"模型 {model.model_name} 不支持特征重要性解释",
             )
 
-        predictions = model.predict_from_pydantic(data)
-        value = float(predictions[0])
-        explanation = model.explain_from_pydantic(data, top_k=top_k)
-
-        return ExplainResponse(
-            prediction=value,
-            model_name=explanation["model_name"],
-            top_features=explanation["top_features"],
-            feature_values=explanation["feature_values"],
-        )
+        result = model.explain_from_pydantic(data, top_k=top_k)
+        return ExplainResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:

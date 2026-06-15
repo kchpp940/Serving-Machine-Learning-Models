@@ -1,12 +1,20 @@
 import sys
 import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from pydantic import BaseModel, Field
 
-from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.feature_schema import (
+    FEATURE_ORDER,
+    CATEGORICAL_FEATURES,
+    PREDICTION_CURRENCY,
+    EXPLAIN_TOP_FEATURES_DESCRIPTION,
+    EXPLAIN_FEATURE_VALUES_DESCRIPTION,
+    GLOBAL_IMPORTANCE_DESCRIPTION,
+    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
+)
 
 
 class CarPrediction(BaseModel):
@@ -40,22 +48,24 @@ class CarPrediction(BaseModel):
 
 class PredictionResponse(BaseModel):
     prediction: float = Field(description="Predicted car price")
-    status: str = Field(default="ok", description="Response status")
+    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
+    model_name: str = Field(description="Name of the ML model that produced the prediction")
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "status": "ok",
+                "currency": "USD",
+                "model_name": "GradientBoostingRegressor",
             }
         }
 
 
-class FeatureImportanceItem(BaseModel):
+class GlobalFeatureImportance(BaseModel):
     feature: str = Field(description="Internal feature code name")
-    label: str = Field(description="Human-readable feature name from schema")
-    global_importance: float = Field(description="Global feature importance score (raw)")
-    global_importance_percent: float = Field(description="Global feature importance as percentage")
+    label: str = Field(description="Human-readable feature label from the shared feature schema")
+    global_importance: float = Field(description=GLOBAL_IMPORTANCE_DESCRIPTION)
+    global_importance_percent: float = Field(description=GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -68,9 +78,9 @@ class FeatureImportanceItem(BaseModel):
         }
 
 
-class FeatureValueItem(BaseModel):
+class InputFeatureValue(BaseModel):
     value: Any = Field(description="Original input feature value")
-    label: str = Field(description="Human-readable feature name from schema")
+    label: str = Field(description="Human-readable feature label from the shared feature schema")
     display: str = Field(description="Human-readable feature value representation")
 
     class Config:
@@ -85,14 +95,16 @@ class FeatureValueItem(BaseModel):
 
 class ExplainResponse(BaseModel):
     prediction: float = Field(description="Predicted car price")
-    model_name: str = Field(description="Name of the ML model used")
-    top_features: List[FeatureImportanceItem] = Field(description="Top N features by global importance")
-    feature_values: Dict[str, FeatureValueItem] = Field(description="Input feature values with schema labels and display strings")
+    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
+    model_name: str = Field(description="Name of the ML model that produced the prediction")
+    top_features: List[GlobalFeatureImportance] = Field(description=EXPLAIN_TOP_FEATURES_DESCRIPTION)
+    feature_values: Dict[str, InputFeatureValue] = Field(description=EXPLAIN_FEATURE_VALUES_DESCRIPTION)
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
+                "currency": "USD",
                 "model_name": "GradientBoostingRegressor",
                 "top_features": [
                     {

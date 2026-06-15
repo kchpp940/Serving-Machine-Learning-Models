@@ -12,6 +12,7 @@ from car_pricing.feature_schema import (
     TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
+    PREDICTION_CURRENCY,
 )
 
 try:
@@ -196,6 +197,7 @@ class CarPriceModel:
         if not self.supports_feature_importance:
             raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
 
+        prediction = float(self.predict_raw(values)[0])
         importances = self.feature_importances()
 
         all_features = []
@@ -222,6 +224,8 @@ class CarPriceModel:
             }
 
         return {
+            "prediction": prediction,
+            "currency": PREDICTION_CURRENCY,
             "model_name": self.model_name,
             "top_features": top_features,
             "feature_values": feature_values,
