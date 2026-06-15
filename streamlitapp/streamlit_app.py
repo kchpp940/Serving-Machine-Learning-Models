@@ -6,12 +6,16 @@ from copy import deepcopy
 from api_client import (
     API_BASE_URL,
     DEFAULT_SCHEMA,
-    PredictionResult,
+    BatchResponse,
+    BatchRowResult,
+    SchemaResponse,
     fetch_schema,
     predict_batch,
     get_default_values,
     get_display_name,
     validate_values,
+    format_value_for_display,
+    get_api_base_url,
 )
 
 st.set_page_config(page_title="Car Price Comparison", layout="wide")
@@ -26,10 +30,14 @@ def init_session_state(schema: dict):
         st.session_state.scenario_values = {}
     if "results" not in st.session_state:
         st.session_state.results = {}
-    if "field_errors" not in st.session_state:
-        st.session_state.field_errors = {}
+    if "field_warnings" not in st.session_state:
+        st.session_state.field_warnings = {}
+    if "server_field_errors" not in st.session_state:
+        st.session_state.server_field_errors = {}
     if "global_error" not in st.session_state:
         st.session_state.global_error = None
+    if "global_info" not in st.session_state:
+        st.session_state.global_info = None
 
     if not st.session_state.scenario_ids:
         add_scenario(schema, name="Scenario 1")
@@ -53,7 +61,7 @@ def add_scenario(schema: dict, name: str | None = None, source_id: str | None = 
 def remove_scenario(scenario_id: str):
     if scenario_id in st.session_state.scenario_ids:
         st.session_state.scenario_ids.remove(scenario_id)
-    for key in ("scenario_names", "scenario_values", "results", "field_errors"):
+    for key in ("scenario_names", "scenario_values", "results", "field_warnings", "server_field_errors"):
         st.session_state[key].pop(scenario_id, None)
 
 
@@ -65,7 +73,8 @@ def copy_scenario(schema: dict, scenario_id: str):
 def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
     name = st.session_state.scenario_names.get(scenario_id, "")
     values = st.session_state.scenario_values.get(scenario_id, {})
-    errors = st.session_state.field_errors.get(scenario_id, {})
+    warnings = st.session_state.field_warnings.get(scenario_id, {})
+    server_errors = st.session_state.server_field_errors.get(scenario_id, {})
 
     feature_order = schema["feature_order"]
     numeric_features = set(schema["numeric_features"])
@@ -75,9 +84,9 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
     display_name = name or f"Scenario {scenario_id}"
     result = st.session_state.results.get(scenario_id)
     result_label = ""
-    if result and result.prediction is not None:
-        result_label = f" · **${result.prediction:,.2f}**"
-    elif result and result.error:
+    if result and result.get("prediction") is not None:
+        result_label = f" · **${result['prediction']:,.2f}**"
+    elif result and result.get("error"):
         result_label = " · ⚠️ Error"
 
     with st.expander(f"📋 {display_name}{result_label}", expanded=expanded):
@@ -112,15 +121,21 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
         for i, field in enumerate(feature_order):
             with cols[i % n_cols]:
                 label = get_display_name(field)
-                has_error = field in errors
-                error_msg = errors.get(field, "")
+                has_warning = field in warnings
+                has_error = field in server_errors
+                warning_msg = warnings.get(field, "")
+                error_msg = server_errors.get(field, "")
+
                 if has_error:
-                    st.markdown(f"<span style='color:#ff6b6b'>⚠️ {label}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:#ff6b6b'>❌ {label} — {error_msg}</span>", unsafe_allow_html=True)
+                elif has_warning:
+                    st.markdown(f"<span style='color:#ffc107'>⚠️ {label} — {warning_msg}</span>", unsafe_allow_html=True)
+
                 current_val = values.get(field)
                 if field in numeric_features:
                     step = 1.0 if field in ("enginesize", "curbweight", "horsepower", "highwaympg", "citympg") else 0.1
                     val = st.number_input(
-                        label if not has_error else f"{label} — {error_msg}",
+                        label if not (has_warning or has_error) else " ",
                         value=float(current_val) if current_val is not None else 0.0,
                         step=step,
                         key=f"num_{scenario_id}_{field}",
@@ -135,7 +150,7 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
                         if current_val in form_values:
                             current_idx = form_values.index(current_val)
                         sel_idx = st.selectbox(
-                            label if not has_error else f"{label} — {error_msg}",
+                            label if not (has_warning or has_error) else " ",
                             range(len(display_labels)),
                             index=current_idx,
                             format_func=lambda i, dl=display_labels: dl[i],
@@ -144,14 +159,14 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
                         st.session_state.scenario_values[scenario_id][field] = form_values[sel_idx]
                     else:
                         val = st.text_input(
-                            label if not has_error else f"{label} — {error_msg}",
+                            label if not (has_warning or has_error) else " ",
                             value=str(current_val) if current_val is not None else "",
                             key=f"textcat_{scenario_id}_{field}",
                         )
                         st.session_state.scenario_values[scenario_id][field] = val
                 else:
                     val = st.text_input(
-                        label if not has_error else f"{label} — {error_msg}",
+                        label if not (has_warning or has_error) else " ",
                         value=str(current_val) if current_val is not None else "",
                         key=f"text_{scenario_id}_{field}",
                     )
@@ -159,71 +174,64 @@ def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
 
         if result:
             st.markdown("---")
-            if result.prediction is not None:
-                st.success(f"✅ Predicted Price: **${result.prediction:,.2f}**")
-            if result.error:
-                st.error(f"❌ {result.error}")
+            if result.get("prediction") is not None:
+                st.success(f"✅ Predicted Price: **${result['prediction']:,.2f}**")
+            if result.get("error"):
+                err = result["error"]
+                fe = result.get("field_errors")
+                if fe:
+                    field_list = ", ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    st.error(f"❌ {err} — {field_list}")
+                else:
+                    st.error(f"❌ {err}")
 
 
-def find_differing_fields(results: list[PredictionResult], schema: dict) -> set[str]:
-    if len(results) < 2:
+def find_differing_fields(result_ids: list[str], schema: dict) -> set[str]:
+    if len(result_ids) < 2:
         return set()
     differing: set[str] = set()
-    ref_id = results[0].scenario_id
+    ref_id = result_ids[0]
     ref_values = st.session_state.scenario_values.get(ref_id, {})
-    for r in results[1:]:
-        vals = st.session_state.scenario_values.get(r.scenario_id, {})
+    for sid in result_ids[1:]:
+        vals = st.session_state.scenario_values.get(sid, {})
         for field in schema["feature_order"]:
             if vals.get(field) != ref_values.get(field):
                 differing.add(field)
     return differing
 
 
-def format_value_for_display(field: str, value, schema: dict) -> str:
-    categorical_options = schema.get("categorical_options", {})
-    opts = categorical_options.get(field, [])
-    if opts:
-        for opt in opts:
-            if opt["form_value"] == value:
-                return opt["display"]
-    if isinstance(value, float):
-        if value.is_integer():
-            return f"{int(value)}"
-        return f"{value:.2f}"
-    return str(value)
-
-
 def render_comparison_table(schema: dict):
-    all_results: list[PredictionResult] = []
-    for sid in st.session_state.scenario_ids:
-        r = st.session_state.results.get(sid)
-        if r:
-            all_results.append(r)
-
-    if not all_results:
+    all_result_ids = [sid for sid in st.session_state.scenario_ids if sid in st.session_state.results]
+    if not all_result_ids:
         return
 
-    successful = [r for r in all_results if r.prediction is not None]
-    successful.sort(key=lambda r: r.prediction)
+    results_with_data = []
+    for sid in all_result_ids:
+        r = st.session_state.results[sid]
+        results_with_data.append((sid, r))
 
-    differing_fields = find_differing_fields(all_results, schema)
+    successful = [(sid, r) for sid, r in results_with_data if r.get("prediction") is not None]
+    successful.sort(key=lambda x: x[1]["prediction"])
+
+    all_ids = [sid for sid, _ in results_with_data]
+    differing_fields = find_differing_fields(all_ids, schema)
 
     st.markdown("## 📊 Comparison Results")
 
-    if any(r.error for r in all_results):
-        error_count = sum(1 for r in all_results if r.error)
-        st.warning(f"{error_count} scenario(s) returned errors. Scroll down for details.")
+    failed = [(sid, r) for sid, r in results_with_data if r.get("error")]
+    if failed:
+        st.warning(f"{len(failed)} scenario(s) returned errors. Valid scenarios still predicted successfully.")
 
     if successful:
         table_data = []
-        for rank, r in enumerate(successful, start=1):
+        for rank, (sid, r) in enumerate(successful, start=1):
             row = {
                 "Rank": rank,
-                "Scenario": st.session_state.scenario_names.get(r.scenario_id, r.scenario_id),
-                "Predicted Price": f"${r.prediction:,.2f}",
+                "Scenario": st.session_state.scenario_names.get(sid, sid),
+                "Predicted Price": f"${r['prediction']:,.2f}",
             }
             for field in schema["feature_order"]:
-                val = st.session_state.scenario_values.get(r.scenario_id, {}).get(field, "")
+                val = st.session_state.scenario_values.get(sid, {}).get(field, "")
                 display_val = format_value_for_display(field, val, schema)
                 if field in differing_fields:
                     row[get_display_name(field) + " 🔺"] = display_val
@@ -241,89 +249,153 @@ def render_comparison_table(schema: dict):
                 + ", ".join(get_display_name(f) for f in differing_fields)
             )
 
-        failed = [r for r in all_results if r.error]
         if failed:
             st.markdown("### ⚠️ Failed Scenarios")
             error_data = []
-            for r in failed:
+            for sid, r in failed:
+                fe = r.get("field_errors")
+                error_detail = r["error"]
+                if fe:
+                    field_list = "; ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    error_detail = f"{error_detail} — {field_list}"
                 error_data.append({
-                    "Scenario": st.session_state.scenario_names.get(r.scenario_id, r.scenario_id),
-                    "Error": r.error,
+                    "Scenario": st.session_state.scenario_names.get(sid, sid),
+                    "Error": error_detail,
                 })
             st.dataframe(pd.DataFrame(error_data), use_container_width=True, hide_index=True)
     else:
-        st.error("No successful predictions to display.")
+        if failed:
+            st.error("No successful predictions. All scenarios have errors — see details below.")
+            error_data = []
+            for sid, r in failed:
+                fe = r.get("field_errors")
+                error_detail = r["error"]
+                if fe:
+                    field_list = "; ".join(f"{get_display_name(k)}: {v}" for k, v in fe.items())
+                    error_detail = f"{error_detail} — {field_list}"
+                error_data.append({
+                    "Scenario": st.session_state.scenario_names.get(sid, sid),
+                    "Error": error_detail,
+                })
+            st.dataframe(pd.DataFrame(error_data), use_container_width=True, hide_index=True)
+
+
+def run_client_side_validation(schema: dict) -> bool:
+    st.session_state.field_warnings = {}
+    has_any_warning = False
+    for sid in st.session_state.scenario_ids:
+        values = st.session_state.scenario_values.get(sid, {})
+        name = st.session_state.scenario_names.get(sid, "")
+        warns = {}
+        if not name:
+            warns["__name__"] = "Scenario name is required"
+            has_any_warning = True
+        field_warns = validate_values(values, schema)
+        if field_warns:
+            warns.update(field_warns)
+            has_any_warning = True
+        if warns:
+            st.session_state.field_warnings[sid] = warns
+    return has_any_warning
 
 
 def run_prediction_batch(schema: dict):
     st.session_state.global_error = None
-    st.session_state.field_errors = {}
+    st.session_state.global_info = None
+    st.session_state.server_field_errors = {}
 
-    has_any_error = False
-    batch_inputs: list[PredictionResult] = []
+    has_warnings = run_client_side_validation(schema)
 
+    rows = []
+    row_ids = []
     for sid in st.session_state.scenario_ids:
         values = st.session_state.scenario_values.get(sid, {})
-        name = st.session_state.scenario_names.get(sid, "")
-        if not name:
-            st.session_state.field_errors.setdefault(sid, {})["__name__"] = "Scenario name is required"
-            has_any_error = True
+        rows.append(deepcopy(values))
+        row_ids.append(sid)
 
-        field_errs = validate_values(values, schema)
-        if field_errs:
-            st.session_state.field_errors[sid] = field_errs
-            has_any_error = True
+    with st.spinner(f"Running batch prediction for {len(rows)} scenario(s)..."):
+        batch_response: BatchResponse = predict_batch(rows=rows, row_ids=row_ids)
 
-        batch_inputs.append(PredictionResult(
-            scenario_id=sid,
-            name=name,
-            values=deepcopy(values),
-        ))
-
-    if has_any_error:
-        st.session_state.global_error = "Some scenarios have invalid fields. Please fix them and try again."
+    if batch_response.transport_error:
+        st.session_state.global_error = batch_response.transport_error
+        if has_warnings:
+            st.session_state.global_info = (
+                "Client-side validation also found issues in some scenarios, "
+                "but the primary issue is the service connection."
+            )
         return
 
-    with st.spinner(f"Running predictions for {len(batch_inputs)} scenario(s)..."):
-        results = predict_batch(batch_inputs)
+    for row_result in batch_response.results:
+        sid = row_result.row_id
+        if sid is None:
+            continue
+        result_data = {
+            "prediction": row_result.prediction,
+            "error": row_result.error,
+            "field_errors": row_result.field_errors,
+        }
+        st.session_state.results[sid] = result_data
+        if row_result.field_errors:
+            st.session_state.server_field_errors[sid] = dict(row_result.field_errors)
 
-    for r in results:
-        st.session_state.results[r.scenario_id] = r
+    success = batch_response.success_count
+    errors = batch_response.error_count
+    total = batch_response.total_count
 
-    has_success = any(r.prediction is not None for r in results)
-    has_failure = any(r.error for r in results)
+    if success > 0 and errors == 0:
+        st.session_state.global_info = f"✅ All {success} prediction(s) succeeded."
+    elif success > 0 and errors > 0:
+        st.session_state.global_info = (
+            f"✅ {success} succeeded, ⚠️ {errors} failed. "
+            "Invalid scenarios are shown with errors; valid ones still predicted."
+        )
+    elif errors == total and total > 0:
+        st.session_state.global_error = (
+            f"⚠️ All {errors} scenario(s) failed. "
+            "Check the field errors in each scenario and try again."
+        )
 
-    if has_success and not has_failure:
-        st.session_state.global_error = None
-    elif has_failure and not has_success:
-        st.session_state.global_error = "All prediction requests failed. Check the service status and try again."
-    else:
-        st.session_state.global_error = "Some predictions succeeded while others failed. See details below."
+    if has_warnings and success > 0:
+        if not st.session_state.global_info:
+            st.session_state.global_info = (
+                "Some scenarios have client-side warnings but were still submitted. "
+                "The server validated and processed valid rows independently."
+            )
 
 
 def main():
     st.title("🚗 Car Price — Scenario Comparison")
     st.markdown(
         "Compare multiple vehicle configurations side-by-side. "
-        "Add scenarios, copy existing ones, tweak a few fields, and predict all at once."
+        "Add scenarios, copy existing ones, tweak a few fields, and predict all at once. "
+        "Valid scenarios always predict even if some have errors."
     )
 
     with st.spinner("Loading feature schema from prediction service..."):
-        schema, schema_error = fetch_schema()
+        schema_resp: SchemaResponse = fetch_schema()
 
-    if schema_error is not None:
+    if schema_resp.error and schema_resp.using_fallback:
         st.warning(
-            f"{schema_error} Using built-in fallback schema. "
+            f"{schema_resp.error} Using built-in fallback schema. "
             "The form may not match the server's expectations until the service is reachable."
         )
-        schema = DEFAULT_SCHEMA
+        schema = schema_resp.schema
     else:
-        st.success(f"✅ Schema loaded from `{API_BASE_URL}` ({len(schema['feature_order'])} features)")
+        base_url = get_api_base_url()
+        feat_count = len(schema_resp.schema.get("feature_order", [])) if schema_resp.schema else 0
+        st.success(f"✅ Schema loaded from `{base_url}` ({feat_count} features)")
+        schema = schema_resp.schema
+
+    if schema is None:
+        st.error("Failed to load schema and no fallback available.")
+        return
 
     init_session_state(schema)
 
     if st.session_state.global_error:
         st.error(st.session_state.global_error)
+    if st.session_state.global_info:
+        st.info(st.session_state.global_info)
 
     st.markdown("---")
 

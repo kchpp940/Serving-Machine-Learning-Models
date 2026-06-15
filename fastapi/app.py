@@ -8,8 +8,15 @@ import joblib
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi import HTTPException
-from models import CarPrediction, PredictionResponse
+from models import (
+    CarPrediction,
+    PredictionResponse,
+    BatchPredictionRequest,
+    BatchPredictionResponse,
+    BatchRowResult,
+)
 import numpy as np
+from typing import Dict, Any, List
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
@@ -92,3 +99,77 @@ def predict(data: CarPrediction):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+
+
+def _validate_and_predict_row(values: Dict[str, Any], model: CarPriceModel) -> BatchRowResult:
+    schema = model.schema
+    field_errors: Dict[str, str] = {}
+    numeric_set = set(schema.numeric_features)
+    categorical_set = set(schema.categorical_features)
+    categorical_options = {f: model.categorical_options(f) for f in schema.categorical_features}
+
+    for field in schema.feature_order:
+        if field not in values:
+            field_errors[field] = "Missing value"
+            continue
+        val = values[field]
+        if field in numeric_set:
+            try:
+                float(val)
+            except (ValueError, TypeError):
+                field_errors[field] = "Must be a number"
+        elif field in categorical_set:
+            opts = categorical_options.get(field, [])
+            if opts:
+                valid_values = {opt["form_value"] for opt in opts}
+                if val not in valid_values:
+                    field_errors[field] = f"Invalid option: {val}"
+
+    if field_errors:
+        return BatchRowResult(
+            prediction=None,
+            error="Invalid field values",
+            field_errors=field_errors,
+        )
+
+    try:
+        prediction = model.predict_raw(values)
+        return BatchRowResult(
+            prediction=float(prediction[0]),
+            error=None,
+            field_errors=None,
+        )
+    except ValueError as e:
+        return BatchRowResult(
+            prediction=None,
+            error=str(e),
+            field_errors=None,
+        )
+    except Exception as e:
+        return BatchRowResult(
+            prediction=None,
+            error=f"Prediction failed: {str(e)}",
+            field_errors=None,
+        )
+
+
+@app.post("/predict_batch", response_model=BatchPredictionResponse)
+def predict_batch(request: BatchPredictionRequest):
+    model = get_model()
+    results: List[BatchRowResult] = []
+
+    for i, row in enumerate(request.rows):
+        row_id = request.row_ids[i] if request.row_ids and i < len(request.row_ids) else str(i)
+        result = _validate_and_predict_row(row, model)
+        result.row_id = row_id
+        results.append(result)
+
+    success_count = sum(1 for r in results if r.prediction is not None)
+    error_count = len(results) - success_count
+
+    return BatchPredictionResponse(
+        results=results,
+        success_count=success_count,
+        error_count=error_count,
+        total_count=len(results),
+    )

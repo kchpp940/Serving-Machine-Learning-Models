@@ -3,6 +3,8 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from typing import List, Optional, Dict, Any
+
 from pydantic import BaseModel, Field
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
@@ -48,3 +50,22 @@ class PredictionResponse(BaseModel):
                 "status": "ok",
             }
         }
+
+
+class BatchPredictionRequest(BaseModel):
+    rows: List[Dict[str, Any]]
+    row_ids: Optional[List[str]] = None
+
+
+class BatchRowResult(BaseModel):
+    row_id: Optional[str] = None
+    prediction: Optional[float] = None
+    error: Optional[str] = None
+    field_errors: Optional[Dict[str, str]] = None
+
+
+class BatchPredictionResponse(BaseModel):
+    results: List[BatchRowResult]
+    success_count: int
+    error_count: int
+    total_count: int
