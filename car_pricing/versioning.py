@@ -95,11 +95,3 @@ def attach_versions_to_schema(
     if data_source is not None:
         result["data_version"] = compute_data_version(data_source)
     return result
-
-
-def build_default_schema_dict(include_encoders: bool = True) -> dict:
-    from car_pricing.feature_schema import FeatureSchema
-    schema = FeatureSchema.default()
-    schema_dict = schema.to_dict(include_encoders=include_encoders)
-    schema_dict["schema_version"] = compute_schema_version(schema_dict)
-    return schema_dict

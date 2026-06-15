@@ -6,14 +6,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import streamlit as st
 import requests as re
 
-from car_pricing.versioning import build_default_schema_dict
+from car_pricing.feature_schema import FeatureSchema
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 
 def _fallback_schema_dict() -> dict:
-    return build_default_schema_dict(include_encoders=False)
+    return FeatureSchema.to_default_dict(include_encoders=False)
 
 
 @st.cache_data(show_spinner=False)

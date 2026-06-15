@@ -295,6 +295,14 @@ class FeatureSchema:
     def default(cls) -> "FeatureSchema":
         return cls()
 
+    @classmethod
+    def to_default_dict(cls, include_encoders: bool = True) -> dict:
+        schema = cls.default()
+        schema_dict = schema.to_dict(include_encoders=include_encoders)
+        from car_pricing.versioning import compute_schema_version
+        schema_dict["schema_version"] = compute_schema_version(schema_dict)
+        return schema_dict
+
 
 def load_training_data(csv_path: str) -> pd.DataFrame:
     schema = FeatureSchema.default()

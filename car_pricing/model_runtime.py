@@ -159,10 +159,11 @@ class CarPriceModel:
         return self.schema.categorical_options(field_name)
 
     def to_schema_dict(self, include_encoders: bool = True) -> dict:
-        from car_pricing.versioning import compute_schema_version
         result = self.schema.to_dict(include_encoders=include_encoders)
         if "schema_version" not in result:
-            result["schema_version"] = self.schema.schema_version or compute_schema_version(result)
+            result["schema_version"] = self.schema_version
+        if "data_version" not in result and self.data_version is not None:
+            result["data_version"] = self.data_version
         return result
 
     # ---------- 编码 ----------

@@ -12,7 +12,6 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing import versioning
-from car_pricing.versioning import build_default_schema_dict
 
 __all__ = [
     "FeatureSchema",
@@ -26,6 +25,5 @@ __all__ = [
     "is_model_bundle",
     "CarPriceModel",
     "versioning",
-    "build_default_schema_dict",
 ]
 

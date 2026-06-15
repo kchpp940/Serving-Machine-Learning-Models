@@ -5,11 +5,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from pydantic import BaseModel, Field, create_model
 
-from car_pricing.versioning import build_default_schema_dict
+from car_pricing.feature_schema import FeatureSchema
 
 
 def build_car_prediction_model() -> type:
-    schema_dict = build_default_schema_dict(include_encoders=False)
+    schema_dict = FeatureSchema.to_default_dict(include_encoders=False)
     feature_order = schema_dict["feature_order"]
     numeric_set = set(schema_dict["numeric_features"])
     default_values = schema_dict["default_values"]

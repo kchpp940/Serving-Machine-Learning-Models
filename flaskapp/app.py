@@ -1,11 +1,11 @@
 from flask import Flask, render_template, request, jsonify
 import utils
 
-from car_pricing.versioning import build_default_schema_dict
+from car_pricing.feature_schema import FeatureSchema
 
 app = Flask(__name__)
 
-_default_schema_dict = build_default_schema_dict(include_encoders=False)
+_default_schema_dict = FeatureSchema.to_default_dict(include_encoders=False)
 
 
 def _field_label(field_name: str) -> str:
