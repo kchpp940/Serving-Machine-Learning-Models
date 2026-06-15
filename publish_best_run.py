@@ -3,7 +3,6 @@ import os
 import json
 import argparse
 import hashlib
-import tempfile
 
 _project_root = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, _project_root)
@@ -322,24 +321,12 @@ def rebuild_candidate_summary_from_child_runs(
     return summary
 
 
-def get_model_artifact_hash(run_id: str, tracking_uri: str, artifact_path: str = "model") -> str:
-    mlflow.set_tracking_uri(tracking_uri)
-
-    try:
-        local_path = mlflow.artifacts.download_artifacts(
-            run_id=run_id,
-            artifact_path=artifact_path,
-        )
-    except Exception:
+def _compute_dir_hash(path: str) -> str:
+    if not path or not os.path.exists(path):
         return None
-
-    if not local_path or not os.path.exists(local_path):
-        return None
-
     hasher = hashlib.sha256()
-
-    if os.path.isdir(local_path):
-        for root, dirs, files in os.walk(local_path):
+    if os.path.isdir(path):
+        for root, dirs, files in os.walk(path):
             dirs.sort()
             for filename in sorted(files):
                 filepath = os.path.join(root, filename)
@@ -347,17 +334,51 @@ def get_model_artifact_hash(run_id: str, tracking_uri: str, artifact_path: str =
                     for chunk in iter(lambda: f.read(4096), b""):
                         hasher.update(chunk)
     else:
-        with open(local_path, "rb") as f:
+        with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hasher.update(chunk)
-
     return hasher.hexdigest()
+
+
+def get_model_artifact_hash(run_id: str, tracking_uri: str, artifact_path: str = "model") -> str:
+    mlflow.set_tracking_uri(tracking_uri)
+    try:
+        local_path = mlflow.artifacts.download_artifacts(
+            run_id=run_id,
+            artifact_path=artifact_path,
+        )
+    except Exception:
+        return None
+    return _compute_dir_hash(local_path)
+
+
+def extract_bundle_fingerprint(model_bundle) -> dict:
+    from car_pricing.feature_schema import FeatureSchema, compute_schema_version
+
+    fingerprint = {}
+
+    if isinstance(model_bundle, dict) and "model" in model_bundle:
+        inner_model = model_bundle["model"]
+        fingerprint["model_type"] = type(inner_model).__name__
+
+        if "schema" in model_bundle and isinstance(model_bundle["schema"], dict):
+            try:
+                schema = FeatureSchema.from_dict(model_bundle["schema"])
+                fingerprint["schema_version"] = compute_schema_version(schema)
+                fingerprint["feature_order"] = list(schema.feature_order)
+                fingerprint["n_features"] = schema.n_features()
+            except Exception:
+                pass
+
+    return fingerprint
 
 
 def verify_consistency(
     parent_summary: dict,
     rebuilt_summary: dict,
     tracking_uri: str,
+    best_run_id: str = None,
+    model_bundle=None,
 ) -> dict:
     result = {
         "all_checks_passed": True,
@@ -406,19 +427,6 @@ def verify_consistency(
         result["mismatches"].append(
             f"best_metric_value: parent={parent_best_metric}, rebuilt={rebuilt_best_metric}"
         )
-
-    best_run_id = rebuilt_summary.get("best_run_id")
-    model_artifact_hash = None
-    if best_run_id:
-        model_artifact_hash = get_model_artifact_hash(best_run_id, tracking_uri)
-
-    result["checks"]["model_artifact_hash"] = {
-        "passed": model_artifact_hash is not None,
-        "rebuilt_value": model_artifact_hash,
-    }
-    if model_artifact_hash is None:
-        result["all_checks_passed"] = False
-        result["mismatches"].append("model_artifact_hash: could not download or hash model artifact")
 
     parent_candidates = parent_summary.get("candidates", [])
     rebuilt_candidates = rebuilt_summary.get("candidates", [])
@@ -480,7 +488,105 @@ def verify_consistency(
             "all_candidate_metrics: some candidate metrics differ between parent summary and child runs"
         )
 
-    return result, model_artifact_hash
+    if not best_run_id:
+        best_run_id = rebuilt_summary.get("best_run_id")
+
+    recorded_hash = None
+    actual_hash = None
+
+    if best_run_id:
+        mlflow.set_tracking_uri(tracking_uri)
+        try:
+            child_run = mlflow.get_run(best_run_id)
+            recorded_hash = child_run.data.params.get("model_artifact_hash")
+        except Exception:
+            pass
+
+        actual_hash = get_model_artifact_hash(best_run_id, tracking_uri)
+
+    if recorded_hash and actual_hash:
+        hash_match = recorded_hash == actual_hash
+        result["checks"]["artifact_hash_integrity"] = {
+            "passed": hash_match,
+            "recorded_hash": recorded_hash,
+            "actual_hash": actual_hash,
+            "description": "MLflow recorded hash vs actual downloaded artifact hash",
+        }
+        if not hash_match:
+            result["all_checks_passed"] = False
+            result["mismatches"].append(
+                f"artifact_hash_integrity: recorded={recorded_hash[:16]}..., actual={actual_hash[:16]}... "
+                "- model artifact may have been tampered or replaced"
+            )
+    elif actual_hash and not recorded_hash:
+        result["checks"]["artifact_hash_integrity"] = {
+            "passed": False,
+            "recorded_hash": None,
+            "actual_hash": actual_hash,
+            "description": "No model_artifact_hash found in child run params - cannot verify artifact integrity",
+        }
+        result["all_checks_passed"] = False
+        result["mismatches"].append(
+            "artifact_hash_integrity: no model_artifact_hash recorded in child run; "
+            "re-train with updated train_candidates.py to enable full artifact binding"
+        )
+    else:
+        result["checks"]["artifact_hash_integrity"] = {
+            "passed": False,
+            "recorded_hash": recorded_hash,
+            "actual_hash": actual_hash,
+            "description": "Could not compute or retrieve artifact hash",
+        }
+        result["all_checks_passed"] = False
+        result["mismatches"].append(
+            "artifact_hash_integrity: could not compute or retrieve artifact hash"
+        )
+
+    bundle_fingerprint = {}
+    if model_bundle is not None:
+        bundle_fingerprint = extract_bundle_fingerprint(model_bundle)
+
+        bundle_model_type = bundle_fingerprint.get("model_type")
+        mlflow_model_type = None
+        if best_run_id:
+            try:
+                mlflow.set_tracking_uri(tracking_uri)
+                child_run = mlflow.get_run(best_run_id)
+                mlflow_model_type = child_run.data.params.get("model_type")
+            except Exception:
+                pass
+
+        if mlflow_model_type and bundle_model_type:
+            type_match = mlflow_model_type == bundle_model_type
+            result["checks"]["bundle_model_type"] = {
+                "passed": type_match,
+                "mlflow_value": mlflow_model_type,
+                "bundle_value": bundle_model_type,
+                "description": "MLflow model_type param vs actual loaded model class name",
+            }
+            if not type_match:
+                result["all_checks_passed"] = False
+                result["mismatches"].append(
+                    f"bundle_model_type: mlflow={mlflow_model_type}, bundle={bundle_model_type}"
+                )
+
+        bundle_schema_version = bundle_fingerprint.get("schema_version")
+        mlflow_schema_version = parent_summary.get("schema_version")
+        if bundle_schema_version and mlflow_schema_version:
+            sv_match = bundle_schema_version == mlflow_schema_version
+            result["checks"]["bundle_schema_version"] = {
+                "passed": sv_match,
+                "mlflow_value": mlflow_schema_version,
+                "bundle_value": bundle_schema_version,
+                "description": "MLflow schema_version param vs schema_version derived from model bundle schema",
+            }
+            if not sv_match:
+                result["all_checks_passed"] = False
+                result["mismatches"].append(
+                    f"bundle_schema_version: mlflow={mlflow_schema_version}, bundle={bundle_schema_version}"
+                )
+
+    return result, actual_hash
 
 
 def publish_best_run(
@@ -528,6 +634,11 @@ def publish_best_run(
     consistency_result = None
     model_artifact_hash = None
 
+    model_bundle = load_model_from_run(best_run_id, tracking_uri)
+
+    car_price_model = CarPriceModel.from_sklearn_object(model_bundle)
+    car_price_model.schema.validate()
+
     if parent_run_id:
         print(f"\n{'='*50}")
         print("Verifying consistency: rebuilding summary from child runs...")
@@ -550,18 +661,23 @@ def publish_best_run(
             print(f"{marker}{c['model_name']}: {primary_metric}={metric_str}")
 
         print(f"\n{'='*50}")
-        print("Running consistency checks...")
+        print("Running consistency checks (MLflow record vs actual bundle vs BentoML metadata)...")
 
         consistency_result, model_artifact_hash = verify_consistency(
             parent_summary=summary,
             rebuilt_summary=rebuilt_summary,
             tracking_uri=tracking_uri,
+            best_run_id=best_run_id,
+            model_bundle=model_bundle,
         )
 
         print(f"\nConsistency check results:")
         for check_name, check_data in consistency_result["checks"].items():
             status = "✓ PASS" if check_data["passed"] else "✗ FAIL"
             print(f"  {status}: {check_name}")
+            desc = check_data.get("description")
+            if desc and not check_data["passed"]:
+                print(f"         → {desc}")
 
         if not consistency_result["all_checks_passed"]:
             print(f"\n{'='*50}")
@@ -569,8 +685,8 @@ def publish_best_run(
             print("Mismatches:")
             for mismatch in consistency_result["mismatches"]:
                 print(f"  - {mismatch}")
-            print("\nThe parent run summary does not match the actual child run data.")
-            print("This may indicate data tampering or corruption.")
+            print("\nThe parent run summary, actual model bundle, or MLflow records are inconsistent.")
+            print("This may indicate data tampering, corruption, or artifact replacement.")
             print("Aborting publish.")
             raise ValueError(
                 "Consistency checks failed. "
@@ -579,12 +695,7 @@ def publish_best_run(
 
         print(f"\n✓ All consistency checks passed!")
         if model_artifact_hash:
-            print(f"  Model artifact hash: {model_artifact_hash[:16]}...")
-
-    model_bundle = load_model_from_run(best_run_id, tracking_uri)
-
-    car_price_model = CarPriceModel.from_sklearn_object(model_bundle)
-    car_price_model.schema.validate()
+            print(f"  Artifact hash (verified): {model_artifact_hash[:16]}...")
 
     metadata = {
         "candidate_info": _sanitize_metadata({
@@ -603,7 +714,7 @@ def publish_best_run(
             "all_checks_passed": consistency_result["all_checks_passed"] if consistency_result else None,
             "model_artifact_hash": model_artifact_hash,
             "checks": consistency_result["checks"] if consistency_result else None,
-            "verified_at": os.popen('date -u +"%Y-%m-%dT%H:%M:%SZ"').read().strip(),
+            "verified_at": __import__("datetime").datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         }) if consistency_result else _sanitize_metadata({
             "performed": False,
             "reason": "No parent run found - single model publish",
@@ -630,6 +741,34 @@ def publish_best_run(
         metadata=metadata,
         labels=labels,
     )
+
+    if consistency_result and model_artifact_hash:
+        bento_meta = saved_model.info.metadata or {}
+        bento_check = bento_meta.get("consistency_check", {})
+        bento_hash = bento_check.get("model_artifact_hash")
+
+        if bento_hash and bento_hash != model_artifact_hash:
+            print(f"\n{'='*50}")
+            print("ERROR: BentoML metadata integrity check failed!")
+            print(f"  Saved artifact hash: {bento_hash[:16]}...")
+            print(f"  Verified artifact hash: {model_artifact_hash[:16]}...")
+            print("BentoML metadata does not match the verified artifact hash.")
+            raise ValueError(
+                "BentoML metadata integrity check failed: "
+                f"saved hash {bento_hash[:16]}... != verified hash {model_artifact_hash[:16]}..."
+            )
+
+        bento_ci = bento_meta.get("candidate_info", {})
+        bento_sv = bento_ci.get("schema_version")
+        bento_dv = bento_ci.get("data_version")
+        if bento_sv and bento_sv != summary["schema_version"]:
+            print(f"\nERROR: BentoML metadata schema_version mismatch: {bento_sv} != {summary['schema_version']}")
+            raise ValueError("BentoML metadata schema_version mismatch after save")
+        if bento_dv and bento_dv != summary["data_version"]:
+            print(f"\nERROR: BentoML metadata data_version mismatch: {bento_dv} != {summary['data_version']}")
+            raise ValueError("BentoML metadata data_version mismatch after save")
+
+        print(f"\n✓ BentoML metadata integrity verified (hash + schema/data version match)")
 
     print(f"\n{'='*50}")
     print(f"Model saved to BentoML: {saved_model.tag}")

@@ -18,6 +18,7 @@ from car_pricing.feature_schema import (
     load_training_data,
     prepare_training_data,
     bundle_model,
+    compute_schema_version,
     FEATURE_ORDER,
 )
 
@@ -49,10 +50,27 @@ def compute_data_version(csv_path: str) -> str:
         return hashlib.md5(f.read()).hexdigest()[:12]
 
 
-def compute_schema_version(schema: FeatureSchema) -> str:
-    schema_dict = schema.to_dict()
-    schema_str = json.dumps(schema_dict, sort_keys=True)
-    return hashlib.md5(schema_str.encode()).hexdigest()[:12]
+def _hash_artifact(run_id: str) -> str:
+    local_path = mlflow.artifacts.download_artifacts(
+        run_id=run_id,
+        artifact_path="model",
+    )
+    if not local_path or not os.path.exists(local_path):
+        return None
+    hasher = hashlib.sha256()
+    if os.path.isdir(local_path):
+        for root, dirs, files in os.walk(local_path):
+            dirs.sort()
+            for filename in sorted(files):
+                filepath = os.path.join(root, filename)
+                with open(filepath, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hasher.update(chunk)
+    else:
+        with open(local_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def train_single_candidate(model_name, model_class, model_params, X_train, X_test, y_train, y_test, schema, data_version, schema_version):
@@ -71,6 +89,7 @@ def train_single_candidate(model_name, model_class, model_params, X_train, X_tes
         mlflow.log_param("schema_version", schema_version)
         mlflow.log_param("data_version", data_version)
         mlflow.log_param("n_features", schema.n_features())
+        mlflow.log_param("model_type", type(model).__name__)
 
         mlflow.log_metric("r2_score", r2)
         mlflow.log_metric("mse", mse)
@@ -79,6 +98,11 @@ def train_single_candidate(model_name, model_class, model_params, X_train, X_tes
         bundle = bundle_model(model, schema)
         mlflow.sklearn.log_model(bundle, "model")
 
+        artifact_hash = _hash_artifact(run.info.run_id)
+        if artifact_hash:
+            mlflow.log_param("model_artifact_hash", artifact_hash)
+            mlflow.set_tag("model_artifact_hash", artifact_hash)
+
         mlflow.set_tag("candidate_model", model_name)
         mlflow.set_tag("schema_version", schema_version)
         mlflow.set_tag("data_version", data_version)
@@ -86,6 +110,7 @@ def train_single_candidate(model_name, model_class, model_params, X_train, X_tes
         return {
             "run_id": run.info.run_id,
             "model_name": model_name,
+            "model_type": type(model).__name__,
             "params": model_params,
             "metrics": {
                 "r2_score": r2,
@@ -94,6 +119,7 @@ def train_single_candidate(model_name, model_class, model_params, X_train, X_tes
             },
             "schema_version": schema_version,
             "data_version": data_version,
+            "model_artifact_hash": artifact_hash,
         }
 
 
@@ -172,12 +198,16 @@ def main():
             "best_metric_value": best["metrics"][PRIMARY_METRIC],
             "schema_version": schema_version,
             "data_version": data_version,
+            "best_model_artifact_hash": best.get("model_artifact_hash"),
+            "best_model_type": best.get("model_type"),
             "candidates": [
                 {
                     "model_name": c["model_name"],
+                    "model_type": c.get("model_type"),
                     "run_id": c["run_id"],
                     "metrics": c["metrics"],
                     "params": c["params"],
+                    "model_artifact_hash": c.get("model_artifact_hash"),
                 }
                 for c in candidates
             ],

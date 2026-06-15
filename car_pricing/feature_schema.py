@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
+import hashlib
+import json
 import numpy as np
 import pandas as pd
 
@@ -259,6 +261,11 @@ def bundle_model(model, schema: FeatureSchema) -> dict:
     }
     return bundle
 
+
+def compute_schema_version(schema) -> str:
+    schema_dict = schema.to_dict()
+    schema_str = json.dumps(schema_dict, sort_keys=True)
+    return hashlib.md5(schema_str.encode()).hexdigest()[:12]
 
 def is_model_bundle(obj) -> bool:
     return isinstance(obj, dict) and "model" in obj and "schema" in obj

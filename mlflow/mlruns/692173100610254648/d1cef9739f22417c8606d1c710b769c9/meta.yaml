@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/d1cef9739f22417c8606d1c710b769c9/artifacts
+end_time: 1781497644126
+entry_point_name: ''
+experiment_id: '692173100610254648'
+lifecycle_stage: active
+run_id: d1cef9739f22417c8606d1c710b769c9
+run_name: RandomForest
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1781497639183
+status: 3
+tags: []
+user_id: pkcha
