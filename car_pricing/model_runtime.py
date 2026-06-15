@@ -6,6 +6,10 @@ import pandas as pd
 
 from car_pricing.feature_schema import (
     FeatureSchema,
+    FEATURE_ORDER,
+    NUMERIC_FEATURES,
+    CATEGORICAL_FEATURES,
+    TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
 )
@@ -14,6 +18,11 @@ try:
     import joblib
 except ImportError:  # pragma: no cover
     joblib = None
+
+
+_DEFAULT_FEATURE_ORDER_LEGACY = list(FEATURE_ORDER)
+_NUMERIC_FEATURE_SET = set(NUMERIC_FEATURES)
+_CATEGORICAL_FEATURE_SET = set(CATEGORICAL_FEATURES)
 
 
 def _is_legacy_bundle(obj) -> bool:
@@ -53,7 +62,7 @@ class CarPriceModel:
     def _schema_from_legacy_bundle(self, raw: dict) -> FeatureSchema:
         schema = FeatureSchema(
             feature_order=list(raw["feature_order"]),
-            target_column=raw.get("target_column", "price"),
+            target_column=raw.get("target_column", TARGET_COLUMN),
         )
         legacy_encoders = raw.get("categorical_encoders", {})
         if legacy_encoders:
@@ -127,44 +136,11 @@ class CarPriceModel:
     def target_column(self) -> str:
         return self.schema.target_column
 
-    @property
-    def display_names(self) -> dict:
-        return {f: self.schema.field_display_name(f) for f in self.schema.feature_order}
-
-    @property
-    def default_values(self) -> dict:
-        return {f: self.schema.field_default_value(f) for f in self.schema.feature_order}
-
-    @property
-    def schema_version(self) -> str:
-        if self.schema.schema_version is not None:
-            return self.schema.schema_version
-        from car_pricing.versioning import compute_schema_version
-        return compute_schema_version(self.schema.to_dict(include_encoders=False))
-
-    @property
-    def data_version(self):
-        return self.schema.data_version
-
-    def field_display_name(self, field_name: str) -> str:
-        return self.schema.field_display_name(field_name)
-
-    def field_default_value(self, field_name: str):
-        return self.schema.field_default_value(field_name)
-
     def categorical_classes(self, field_name: str):
         return self.schema.categorical_classes(field_name)
 
     def categorical_options(self, field_name: str) -> list:
         return self.schema.categorical_options(field_name)
-
-    def to_schema_dict(self, include_encoders: bool = True) -> dict:
-        result = self.schema.to_dict(include_encoders=include_encoders)
-        if "schema_version" not in result:
-            result["schema_version"] = self.schema_version
-        if "data_version" not in result and self.data_version is not None:
-            result["data_version"] = self.data_version
-        return result
 
     # ---------- 编码 ----------
 

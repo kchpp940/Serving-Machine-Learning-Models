@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Any
+import hashlib
+import json
 import numpy as np
 import pandas as pd
 
@@ -107,7 +109,6 @@ class FeatureSchema:
     categorical_encoders: Dict[str, "LabelEncoder"] = field(default_factory=dict)
     display_names: Dict[str, str] = field(default_factory=lambda: dict(FIELD_DISPLAY_NAMES))
     default_values: Dict[str, Any] = field(default_factory=lambda: dict(FIELD_DEFAULT_VALUES))
-    schema_version: Optional[str] = None
     data_version: Optional[str] = None
 
     def validate(self) -> None:
@@ -237,6 +238,25 @@ class FeatureSchema:
             })
         return options
 
+    def schema_version(self) -> str:
+        signature = {
+            "feature_order": self.feature_order,
+            "numeric_features": self.numeric_features,
+            "categorical_features": self.categorical_features,
+            "target_column": self.target_column,
+            "display_names": {f: self.field_display_name(f) for f in self.feature_order},
+            "categorical_options": {},
+        }
+        for f in self.categorical_features:
+            if f in self.categorical_encoders:
+                signature["categorical_options"][f] = [
+                    opt["form_value"] for opt in self.categorical_options(f)
+                ]
+            else:
+                signature["categorical_options"][f] = []
+        raw = json.dumps(signature, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
     def to_dict(self, include_encoders: bool = True) -> dict:
         result = {
             "feature_order": list(self.feature_order),
@@ -245,12 +265,11 @@ class FeatureSchema:
             "target_column": self.target_column,
             "display_names": {f: self.field_display_name(f) for f in self.feature_order},
             "default_values": {f: self.field_default_value(f) for f in self.feature_order},
+            "schema_version": self.schema_version(),
         }
-        if self.schema_version is not None:
-            result["schema_version"] = self.schema_version
         if self.data_version is not None:
             result["data_version"] = self.data_version
-        if include_encoders and self.categorical_encoders:
+        if include_encoders:
             encoder_data = {}
             for col, le in self.categorical_encoders.items():
                 encoder_data[col] = {
@@ -258,7 +277,7 @@ class FeatureSchema:
                 }
             result["categorical_encoders"] = encoder_data
             result["categorical_options"] = {
-                f: self.categorical_options(f) for f in self.categorical_encoders
+                f: self.categorical_options(f) for f in self.categorical_features
             }
         return result
 
@@ -273,7 +292,6 @@ class FeatureSchema:
             target_column=data.get("target_column", TARGET_COLUMN),
             display_names=dict(data.get("display_names", FIELD_DISPLAY_NAMES)),
             default_values=dict(data.get("default_values", FIELD_DEFAULT_VALUES)),
-            schema_version=data.get("schema_version", None),
             data_version=data.get("data_version", None),
         )
         encoders = {}
@@ -294,14 +312,6 @@ class FeatureSchema:
     @classmethod
     def default(cls) -> "FeatureSchema":
         return cls()
-
-    @classmethod
-    def to_default_dict(cls, include_encoders: bool = True) -> dict:
-        schema = cls.default()
-        schema_dict = schema.to_dict(include_encoders=include_encoders)
-        from car_pricing.versioning import compute_schema_version
-        schema_dict["schema_version"] = compute_schema_version(schema_dict)
-        return schema_dict
 
 
 def load_training_data(csv_path: str) -> pd.DataFrame:

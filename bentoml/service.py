@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing.feature_schema import FEATURE_ORDER
 
 
 predictor = bentoml.sklearn.load_runner("gbr:latest")
@@ -38,16 +39,14 @@ def get_model():
 @service.api(input=PandasDataFrame(), output=NumpyNdarray())
 def predict(df: pd.DataFrame) -> np.ndarray:
     model = get_model()
-    schema = model.to_schema_dict(include_encoders=False)
 
-    feature_order = schema["feature_order"]
-    missing_cols = set(feature_order) - set(df.columns)
+    missing_cols = set(FEATURE_ORDER) - set(df.columns)
     if missing_cols:
         raise ValueError(f"输入数据缺少列: {missing_cols}")
 
-    extra_cols = set(df.columns) - set(feature_order)
+    extra_cols = set(df.columns) - set(FEATURE_ORDER)
     if extra_cols:
-        df = df[feature_order]
+        df = df[FEATURE_ORDER]
 
     result = model.predict_dataframe(df)
     return np.array(result)

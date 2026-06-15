@@ -1,19 +1,52 @@
-import sys
 import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import streamlit as st
 import requests as re
-
-from car_pricing.feature_schema import FeatureSchema
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
+DEFAULT_SCHEMA = {
+    "feature_order": [
+        "enginesize", "curbweight", "horsepower", "highwaympg",
+        "carwidth", "wheelbase", "drivewheel", "citympg",
+        "boreratio", "cylindernumber",
+    ],
+    "numeric_features": [
+        "enginesize", "curbweight", "horsepower", "highwaympg",
+        "carwidth", "wheelbase", "citympg", "boreratio",
+    ],
+    "categorical_features": ["drivewheel", "cylindernumber"],
+    "target_column": "price",
+    "categorical_options": {
+        "drivewheel": [
+            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
+            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
+            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
+        ],
+        "cylindernumber": [
+            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
+            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
+            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
+            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
+            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
+            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
+            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
+        ],
+    },
+}
 
-def _fallback_schema_dict() -> dict:
-    return FeatureSchema.to_default_dict(include_encoders=False)
+FIELD_DISPLAY_NAMES = {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway Miles Per Gallon",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheel Base",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City Miles Per Gallon",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders",
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -45,53 +78,27 @@ def fetch_schema():
         return None, f"Unexpected error fetching schema: {str(e)}"
 
 
-def _field_display_name(schema: dict, field_name: str) -> str:
-    display_names = schema.get("display_names", {})
-    if field_name in display_names:
-        return display_names[field_name]
-    return field_name.replace("_", " ").title()
-
-
-def _field_default_value(schema: dict, field_name: str):
-    default_values = schema.get("default_values", {})
-    if field_name in default_values:
-        return default_values[field_name]
-    numeric_set = set(schema.get("numeric_features", []))
-    return 0.0 if field_name in numeric_set else ""
-
-
 def build_form(schema):
     feature_order = schema["feature_order"]
     numeric_features = set(schema["numeric_features"])
     categorical_features = set(schema["categorical_features"])
-    categorical_options = schema.get("categorical_options", {})
+    categorical_options = schema["categorical_options"]
 
     inputs = {}
     for field in feature_order:
-        label = _field_display_name(schema, field)
-        default_val = _field_default_value(schema, field)
+        label = FIELD_DISPLAY_NAMES.get(field, field.replace("_", " ").title())
         if field in numeric_features:
-            inputs[field] = st.number_input(label, value=float(default_val), step=0.1)
+            inputs[field] = st.number_input(label, value=0.0, step=0.1)
         elif field in categorical_features:
             options = categorical_options.get(field, [])
             if not options:
-                inputs[field] = st.text_input(label, value=str(default_val))
+                inputs[field] = st.text_input(label)
             else:
                 display_labels = [opt["display"] for opt in options]
-                default_index = 0
-                for i, opt in enumerate(options):
-                    if opt["form_value"] == default_val:
-                        default_index = i
-                        break
-                selected_idx = st.selectbox(
-                    label,
-                    range(len(display_labels)),
-                    index=default_index,
-                    format_func=lambda i: display_labels[i],
-                )
+                selected_idx = st.selectbox(label, range(len(display_labels)), format_func=lambda i: display_labels[i])
                 inputs[field] = options[selected_idx]["form_value"]
         else:
-            inputs[field] = st.text_input(label, value=str(default_val))
+            inputs[field] = st.text_input(label)
     return inputs
 
 
@@ -109,7 +116,7 @@ def main():
     using_fallback = False
     if schema_error is not None:
         st.warning(f"{schema_error} Using default schema. The form may not match the server's expectations.")
-        schema = _fallback_schema_dict()
+        schema = DEFAULT_SCHEMA
         using_fallback = True
     else:
         st.success(f"Loaded schema from {API_BASE_URL} ({len(schema['feature_order'])} features)")

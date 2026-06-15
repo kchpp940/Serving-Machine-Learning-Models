@@ -13,7 +13,6 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
-from car_pricing.versioning import compute_schema_version, compute_data_version
 
 
 def main():
@@ -28,13 +27,6 @@ def main():
     model.fit(X_train, y_train)
 
     schema.validate_model_input(model)
-
-    schema_dict = schema.to_dict()
-    schema.schema_version = compute_schema_version(schema_dict)
-    schema.data_version = compute_data_version(csv_path)
-
-    print(f"schema_version: {schema.schema_version}")
-    print(f"data_version: {schema.data_version}")
 
     bundle = bundle_model(model, schema)
 
