@@ -4,12 +4,12 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
-import requests as re
 
 from car_pricing.api_client import (
     create_client,
     ServiceError,
-    ErrorCategory,
+    DEFAULT_SCHEMA,
+    FIELD_DISPLAY_NAMES,
 )
 
 SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
@@ -25,50 +25,6 @@ def _get_client():
     )
 
 
-DEFAULT_SCHEMA = {
-    "feature_order": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "drivewheel", "citympg",
-        "boreratio", "cylindernumber",
-    ],
-    "numeric_features": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "citympg", "boreratio",
-    ],
-    "categorical_features": ["drivewheel", "cylindernumber"],
-    "target_column": "price",
-    "categorical_options": {
-        "drivewheel": [
-            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
-            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
-            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
-        ],
-        "cylindernumber": [
-            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
-            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
-            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
-            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
-            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
-            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
-            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
-        ],
-    },
-}
-
-FIELD_DISPLAY_NAMES = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway Miles Per Gallon",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheel Base",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City Miles Per Gallon",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
-}
-
-
 @st.cache_data(show_spinner=False)
 def fetch_schema():
     client = _get_client()
@@ -80,19 +36,9 @@ def fetch_schema():
             return None, f"Schema missing fields: {', '.join(missing)}"
         return data, None
     except ServiceError as e:
-        if e.category == ErrorCategory.CONNECTION:
-            return None, "Unable to connect to the prediction service to fetch schema."
-        elif e.category == ErrorCategory.TIMEOUT:
-            return None, "Schema request timed out."
-        elif e.category == ErrorCategory.SERVER_ERROR or e.category == ErrorCategory.BAD_REQUEST:
-            detail = e.raw_detail or ""
-            return None, f"Server returned error when fetching schema: {detail or str(e)}"
-        else:
-            return None, f"Unexpected error fetching schema: {str(e)}"
-    except ValueError:
-        return None, "Schema response was not valid JSON."
+        return None, e.message
     except Exception as e:
-        return None, f"Unexpected error fetching schema: {str(e)}"
+        return None, f"Unexpected error fetching schema: {e}"
 
 
 def build_form(schema):
@@ -161,19 +107,9 @@ def main():
             else:
                 st.success(f"The Price of the {names} is {prediction:.2f}$")
         except ServiceError as e:
-            if e.category == ErrorCategory.CONNECTION:
-                st.error("Unable to connect to the prediction service. Please check that the API server is running.")
-            elif e.category == ErrorCategory.TIMEOUT:
-                st.error("The request to the prediction service timed out. Please try again later.")
-            elif e.category == ErrorCategory.SERVER_ERROR or e.category == ErrorCategory.BAD_REQUEST:
-                detail = e.raw_detail or ""
-                st.error(f"Server returned an error ({e.status_code or 'unknown'}): {detail or str(e)}")
-            else:
-                st.error(f"An unexpected error occurred: {str(e)}")
-        except ValueError:
-            st.error("The server returned an invalid response. Please try again later.")
+            st.error(e.message)
         except Exception as e:
-            st.error(f"An unexpected error occurred: {str(e)}")
+            st.error(f"An unexpected error occurred: {e}")
 
 
 if __name__ == "__main__":

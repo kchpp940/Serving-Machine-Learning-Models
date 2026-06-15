@@ -12,7 +12,6 @@ import requests as re
 from car_pricing.api_client import (
     create_client,
     ServiceError,
-    ErrorCategory,
 )
 
 SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
@@ -209,17 +208,7 @@ class MainApp(MDApp):
             else:
                 output.text = f"Predicted Price: {prediction:.2f}$"
         except ServiceError as e:
-            if e.category == ErrorCategory.CONNECTION:
-                output.text = "Error: cannot connect to prediction service"
-            elif e.category == ErrorCategory.TIMEOUT:
-                output.text = "Error: request timed out, please try again"
-            elif e.category == ErrorCategory.SERVER_ERROR or e.category == ErrorCategory.BAD_REQUEST:
-                detail = e.raw_detail or ""
-                output.text = f"Server error: {detail or 'unknown error'}"
-            else:
-                output.text = f"Error: {str(e)}"
-        except ValueError:
-            output.text = "Error: invalid response from server"
+            output.text = f"Error: {e.message}"
         except Exception as e:
             output.text = f"Error: {str(e)}"
 

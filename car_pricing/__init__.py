@@ -23,6 +23,8 @@ from car_pricing.api_client import (
     DEFAULT_TIMEOUT,
     DEFAULT_FASTAPI_BASE_URL,
     DEFAULT_BENTOML_BASE_URL,
+    DEFAULT_SCHEMA,
+    FIELD_DISPLAY_NAMES,
 )
 
 __all__ = [
@@ -46,4 +48,6 @@ __all__ = [
     "DEFAULT_TIMEOUT",
     "DEFAULT_FASTAPI_BASE_URL",
     "DEFAULT_BENTOML_BASE_URL",
+    "DEFAULT_SCHEMA",
+    "FIELD_DISPLAY_NAMES",
 ]
