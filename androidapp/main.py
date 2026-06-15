@@ -7,31 +7,17 @@ from kivymd.app import MDApp
 from kivy.lang.builder import Builder
 from kivy.uix.screenmanager import Screen, ScreenManager
 import certifi as cfi
+import requests as re
 
 from car_pricing.api_client import (
     create_client,
     ServiceError,
-    ServiceType,
+    ErrorCategory,
 )
 
-
 SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
-BASE_URL = os.environ.get("API_BASE_URL")
-TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
-
-
-FIELD_ID_MAP = [
-    ("enginesize", "input_1"),
-    ("curbweight", "input_2"),
-    ("horsepower", "input_3"),
-    ("highwaympg", "input_4"),
-    ("carwidth", "input_5"),
-    ("wheelbase", "input_6"),
-    ("drivewheel", "input_7"),
-    ("citympg", "input_8"),
-    ("boreratio", "input_9"),
-    ("cylindernumber", "input_10"),
-]
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 
 Builder_string = """
@@ -185,27 +171,55 @@ class MainApp(MDApp):
         self.help_string = Builder.load_string(Builder_string)
         self._client = create_client(
             service_type=SERVICE_TYPE,
-            base_url=BASE_URL,
-            timeout=TIMEOUT,
+            base_url=API_BASE_URL,
+            timeout=REQUEST_TIMEOUT,
             verify_ssl=cfi.where(),
         )
         return self.help_string
 
-    def _collect_inputs(self):
-        screen = self.help_string.get_screen("main")
-        values = {}
-        for field, input_id in FIELD_ID_MAP:
-            values[field] = screen.ids[input_id].text
-        return values
-
     def predict(self):
+        enginesize = self.help_string.get_screen("main").ids.input_1.text
+        curbweight = self.help_string.get_screen("main").ids.input_2.text
+        horsepower = self.help_string.get_screen("main").ids.input_3.text
+        highwaympg = self.help_string.get_screen("main").ids.input_4.text
+        carwidth = self.help_string.get_screen("main").ids.input_5.text
+        wheelbase = self.help_string.get_screen("main").ids.input_6.text
+        drivewheel = self.help_string.get_screen("main").ids.input_7.text
+        citympg = self.help_string.get_screen("main").ids.input_8.text
+        boreratio = self.help_string.get_screen("main").ids.input_9.text
+        cylindernumber = self.help_string.get_screen("main").ids.input_10.text
+        values = {
+            "enginesize": enginesize,
+            "curbweight": curbweight,
+            "horsepower": horsepower,
+            "highwaympg": highwaympg,
+            "carwidth": carwidth,
+            "wheelbase": wheelbase,
+            "drivewheel": drivewheel,
+            "citympg": citympg,
+            "boreratio": boreratio,
+            "cylindernumber": cylindernumber
+        }
         output = self.help_string.get_screen("main").ids.output_text
-        values = self._collect_inputs()
         try:
-            result = self._client.predict(values)
-            output.text = f"Predicted Price: {result.prediction:.2f}$"
+            body = self._client.predict(values)
+            prediction = body.get("prediction")
+            if prediction is None:
+                output.text = f"Error: unexpected response from server"
+            else:
+                output.text = f"Predicted Price: {prediction:.2f}$"
         except ServiceError as e:
-            output.text = f"Error: {e.message}"
+            if e.category == ErrorCategory.CONNECTION:
+                output.text = "Error: cannot connect to prediction service"
+            elif e.category == ErrorCategory.TIMEOUT:
+                output.text = "Error: request timed out, please try again"
+            elif e.category == ErrorCategory.SERVER_ERROR or e.category == ErrorCategory.BAD_REQUEST:
+                detail = e.raw_detail or ""
+                output.text = f"Server error: {detail or 'unknown error'}"
+            else:
+                output.text = f"Error: {str(e)}"
+        except ValueError:
+            output.text = "Error: invalid response from server"
         except Exception as e:
             output.text = f"Error: {str(e)}"
 

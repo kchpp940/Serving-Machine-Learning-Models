@@ -90,48 +90,10 @@ class BatchPredictionRequest(BaseModel):
 
 class BatchPredictionResponse(BaseModel):
     predictions: List[float]
-    status: str = "ok"
-    count: int = 0
 
     class Config:
         schema_extra = {
             "example": {
                 "predictions": [13295.27, 18500.50],
-                "status": "ok",
-                "count": 2,
-            }
-        }
-
-
-class ServiceMetadataResponse(BaseModel):
-    service_name: str = "Car Price Prediction API"
-    version: str = "0.0.1"
-    model_name: Optional[str] = None
-    model_mode: Optional[str] = None
-    n_features: Optional[int] = None
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "service_name": "Car Price Prediction API",
-                "version": "0.0.1",
-                "model_name": "sklearn_gbr",
-                "model_mode": "schema_bundle",
-                "n_features": 10,
-            }
-        }
-
-
-class ServiceStatusResponse(BaseModel):
-    status: str
-    uptime_seconds: Optional[float] = None
-    model_loaded: bool = False
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "running",
-                "uptime_seconds": 120.5,
-                "model_loaded": True,
             }
         }

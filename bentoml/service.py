@@ -46,7 +46,7 @@ def predict(df: pd.DataFrame) -> np.ndarray:
 
     missing_cols = set(FEATURE_ORDER) - set(df.columns)
     if missing_cols:
-        raise ValueError(f"输入数据缺少列: {missing_cols}")
+        raise ValueError(f"Missing columns in input: {missing_cols}")
 
     extra_cols = set(df.columns) - set(FEATURE_ORDER)
     if extra_cols:
@@ -54,23 +54,6 @@ def predict(df: pd.DataFrame) -> np.ndarray:
 
     result = model.predict_dataframe(df)
     return np.array(result)
-
-
-@service.api(input=JSON(), output=JSON())
-def predict_json(input_data: dict) -> dict:
-    model = get_model()
-    try:
-        values = {f: input_data[f] for f in FEATURE_ORDER}
-        pred = model.predict_raw(values)
-        return {
-            "prediction": float(pred[0]),
-            "status": "ok",
-        }
-    except KeyError as e:
-        missing = str(e).strip("'")
-        raise ValueError(f"缺少必填字段: {missing}")
-    except ValueError as e:
-        raise
 
 
 @service.api(input=JSON(), output=JSON())
@@ -82,11 +65,7 @@ def predict_batch(input_data: dict) -> dict:
         values = {f: row[f] for f in FEATURE_ORDER}
         pred = model.predict_raw(values)
         predictions.append(float(pred[0]))
-    return {
-        "predictions": predictions,
-        "status": "ok",
-        "count": len(predictions),
-    }
+    return {"predictions": predictions}
 
 
 @service.api(input=Text(), output=JSON())

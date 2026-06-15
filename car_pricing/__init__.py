@@ -16,11 +16,6 @@ from car_pricing.api_client import (
     ServiceType,
     ErrorCategory,
     ServiceError,
-    SchemaInfo,
-    PredictionResult,
-    BatchPredictionResult,
-    ServiceMetadata,
-    ServiceStatus,
     BasePredictionClient,
     FastAPIClient,
     BentoMLClient,
@@ -28,7 +23,6 @@ from car_pricing.api_client import (
     DEFAULT_TIMEOUT,
     DEFAULT_FASTAPI_BASE_URL,
     DEFAULT_BENTOML_BASE_URL,
-    DEFAULT_FALLBACK_SCHEMA,
 )
 
 __all__ = [
@@ -45,11 +39,6 @@ __all__ = [
     "ServiceType",
     "ErrorCategory",
     "ServiceError",
-    "SchemaInfo",
-    "PredictionResult",
-    "BatchPredictionResult",
-    "ServiceMetadata",
-    "ServiceStatus",
     "BasePredictionClient",
     "FastAPIClient",
     "BentoMLClient",
@@ -57,5 +46,4 @@ __all__ = [
     "DEFAULT_TIMEOUT",
     "DEFAULT_FASTAPI_BASE_URL",
     "DEFAULT_BENTOML_BASE_URL",
-    "DEFAULT_FALLBACK_SCHEMA",
 ]

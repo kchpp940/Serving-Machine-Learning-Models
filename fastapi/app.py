@@ -6,19 +6,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import pandas as pd
 import joblib
-import numpy as np
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
 from fastapi import HTTPException
-
 from models import (
     CarPrediction,
     PredictionResponse,
     BatchPredictionRequest,
     BatchPredictionResponse,
-    ServiceMetadataResponse,
-    ServiceStatusResponse,
 )
+import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
@@ -40,7 +37,7 @@ def get_model() -> CarPriceModel:
     if _model is None:
         model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
         if not os.path.exists(model_path):
-            raise RuntimeError(f"模型文件不存在: {model_path}")
+            raise RuntimeError(f"Model file not found: {model_path}")
         _model = CarPriceModel.from_joblib(model_path)
         _model.schema.validate()
     return _model
@@ -102,7 +99,7 @@ def predict(data: CarPrediction):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
 @app.post("/predict_batch", response_model=BatchPredictionResponse)
@@ -113,40 +110,37 @@ def predict_batch(request: BatchPredictionRequest):
         for row in request.rows:
             pred = model.predict_from_pydantic(row)
             predictions.append(float(pred[0]))
-        return BatchPredictionResponse(
-            predictions=predictions,
-            count=len(predictions),
-        )
+        return BatchPredictionResponse(predictions=predictions)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"批量预测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
 
-@app.get("/metadata", response_model=ServiceMetadataResponse)
+@app.get("/metadata")
 async def get_metadata():
     try:
         model = get_model()
-        return ServiceMetadataResponse(
-            service_name="Car Price Prediction API",
-            version="0.0.1",
-            model_name="sklearn_gbr",
-            model_mode=model.mode,
-            n_features=model.schema.n_features(),
-        )
+        return {
+            "service_name": "Car Price Prediction API",
+            "version": "0.0.1",
+            "model_name": "sklearn_gbr",
+            "model_mode": model.mode,
+            "n_features": model.schema.n_features(),
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取元数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get metadata: {str(e)}")
 
 
-@app.get("/status", response_model=ServiceStatusResponse)
+@app.get("/status")
 async def get_status():
     global _start_time
     model_loaded = _model is not None
     uptime = None
     if _start_time is not None:
         uptime = time.time() - _start_time
-    return ServiceStatusResponse(
-        status="running" if model_loaded else "loading",
-        uptime_seconds=uptime,
-        model_loaded=model_loaded,
-    )
+    return {
+        "status": "running" if model_loaded else "loading",
+        "uptime_seconds": uptime,
+        "model_loaded": model_loaded,
+    }
