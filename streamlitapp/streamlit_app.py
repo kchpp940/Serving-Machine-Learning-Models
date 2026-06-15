@@ -232,7 +232,7 @@ def _render_consistency_banner(report):
 
 
 def _render_lineage_table(fastapi_status, bentoml_status):
-    lineage_fields = [
+    core_fields = [
         ("api_version", "API Version"),
         ("service_type", "Service Type"),
         ("model_mode", "Model Mode"),
@@ -243,16 +243,39 @@ def _render_lineage_table(fastapi_status, bentoml_status):
         ("feature_order", "Feature Order"),
         ("api_base_suggestion", "API Base Suggestion"),
     ]
+    lineage_fields = [
+        ("model_name", "Model Name"),
+        ("model_type", "Model Type"),
+        ("source_run_id", "Source Run ID"),
+        ("model_artifact_hash", "Artifact Hash"),
+        ("primary_metric", "Primary Metric"),
+        ("candidate_summary_path", "Candidate Summary Path"),
+    ]
     rows = []
-    for field, label in lineage_fields:
+
+    for field, label in core_fields:
         fa_val = fastapi_status.get(field, "N/A") if fastapi_status else "N/A"
         bm_val = bentoml_status.get(field, "N/A") if bentoml_status else "N/A"
-        if isinstance(fa_val, list):
-            fa_val = str(fa_val)
-        if isinstance(bm_val, list):
-            bm_val = str(bm_val)
+        fa_str = str(fa_val) if not isinstance(fa_val, list) else str(fa_val)
+        bm_str = str(bm_val) if not isinstance(bm_val, list) else str(bm_val)
         match = "✅" if fa_val == bm_val else "❌"
-        rows.append({"Field": label, "FastAPI": str(fa_val), "BentoML": str(bm_val), "Match": match})
+        rows.append({"Category": "Core", "Field": label, "FastAPI": fa_str, "BentoML": bm_str, "Match": match})
+
+    fa_lineage = fastapi_status.get("lineage") or {} if fastapi_status else {}
+    bm_lineage = bentoml_status.get("lineage") or {} if bentoml_status else {}
+
+    for field, label in lineage_fields:
+        fa_val = fa_lineage.get(field, "N/A") if fa_lineage else "N/A"
+        bm_val = bm_lineage.get(field, "N/A") if bm_lineage else "N/A"
+        fa_str = str(fa_val)
+        bm_str = str(bm_val)
+        if field == "model_artifact_hash" and fa_val and fa_val != "N/A":
+            fa_str = fa_str[:16] + "..." if len(fa_str) > 16 else fa_str
+        if field == "model_artifact_hash" and bm_val and bm_val != "N/A":
+            bm_str = bm_str[:16] + "..." if len(bm_str) > 16 else bm_str
+        match = "✅" if fa_val == bm_val else "❌"
+        rows.append({"Category": "Lineage", "Field": label, "FastAPI": fa_str, "BentoML": bm_str, "Match": match})
+
     st.table(rows)
 
 
@@ -263,13 +286,20 @@ def _render_diffs_table(report):
     rows = []
     for d in report.diffs:
         sev_icon = "❌" if d.severity == CONSISTENCY_ERROR else "⚠️"
-        fa_val = str(d.fastapi_value) if not isinstance(d.fastapi_value, list) else str(d.fastapi_value)
-        bm_val = str(d.bentoml_value) if not isinstance(d.bentoml_value, list) else str(d.bentoml_value)
+        fa_val = d.fastapi_value
+        bm_val = d.bentoml_value
+        fa_str = str(fa_val) if not isinstance(fa_val, list) else str(fa_val)
+        bm_str = str(bm_val) if not isinstance(bm_val, list) else str(bm_val)
+        if d.field == "lineage.model_artifact_hash":
+            if fa_val:
+                fa_str = fa_val[:16] + "..." if len(fa_val) > 16 else fa_val
+            if bm_val:
+                bm_str = bm_val[:16] + "..." if len(bm_val) > 16 else bm_val
         rows.append({
             "Severity": sev_icon,
             "Field": d.field,
-            "FastAPI": fa_val,
-            "BentoML": bm_val,
+            "FastAPI": fa_str,
+            "BentoML": bm_str,
         })
     st.table(rows)
 

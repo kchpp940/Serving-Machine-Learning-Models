@@ -12,6 +12,11 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
+from car_pricing.model_lineage import (
+    ModelLineage,
+    load_lineage,
+)
+
 from car_pricing.versioning import (
     compute_schema_version,
     compute_data_version,
@@ -49,6 +54,8 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "ModelLineage",
+    "load_lineage",
     "compute_schema_version",
     "compute_data_version",
     "compute_artifact_hash",

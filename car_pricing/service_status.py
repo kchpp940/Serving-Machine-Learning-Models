@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from car_pricing.feature_schema import (
     FeatureSchema,
@@ -15,6 +15,7 @@ from car_pricing.versioning import (
     compute_schema_version,
     compute_data_version,
 )
+from car_pricing.model_lineage import ModelLineage, load_lineage
 
 
 CONSISTENCY_OK = "ok"
@@ -30,6 +31,16 @@ COMPARISON_FIELDS = [
     "feature_order",
 ]
 
+LINEAGE_COMPARISON_FIELDS = [
+    "model_name",
+    "model_type",
+    "source_run_id",
+    "model_artifact_hash",
+]
+
+CRITICAL_FIELDS = {"schema_version", "data_version", "n_features", "feature_order", "model_artifact_hash"}
+WARNING_FIELDS = {"api_version", "model_mode", "model_name", "model_type", "source_run_id"}
+
 
 @dataclass
 class ServiceStatus:
@@ -43,6 +54,7 @@ class ServiceStatus:
     feature_order: Optional[List[str]]
     api_base_suggestion: str
     last_self_check: Dict[str, Any]
+    lineage: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -69,6 +81,7 @@ def build_service_status(
     service_type: str,
     model: Optional[CarPriceModel],
     data_csv_path: Optional[str] = None,
+    lineage: Optional[ModelLineage] = None,
 ) -> ServiceStatus:
     model_loaded = model is not None
     model_mode = model.mode if model is not None else None
@@ -86,6 +99,10 @@ def build_service_status(
 
     data_version = compute_data_version(data_csv_path)
 
+    if lineage is None:
+        lineage = load_lineage()
+    lineage_dict = lineage.to_dict() if isinstance(lineage, ModelLineage) else lineage
+
     return ServiceStatus(
         api_version=API_VERSION,
         service_type=service_type,
@@ -97,6 +114,7 @@ def build_service_status(
         feature_order=feature_order,
         api_base_suggestion=detect_api_base(),
         last_self_check=self_check_result,
+        lineage=lineage_dict,
     )
 
 
@@ -192,21 +210,41 @@ def compare_service_statuses(
             )
         )
 
-    critical_fields = ["schema_version", "data_version", "n_features", "feature_order"]
-    warning_fields = ["api_version", "model_mode"]
-
     if fastapi_status is not None and bentoml_status is not None:
         for field in COMPARISON_FIELDS:
             fa_val = fastapi_status.get(field)
             bm_val = bentoml_status.get(field)
             if fa_val != bm_val:
-                severity = CONSISTENCY_ERROR if field in critical_fields else CONSISTENCY_WARNING
+                severity = CONSISTENCY_ERROR if field in CRITICAL_FIELDS else CONSISTENCY_WARNING
                 description = (
                     f"{field}: FastAPI={_format_value(fa_val)} vs BentoML={_format_value(bm_val)}"
                 )
                 diffs.append(
                     ConsistencyDiff(
                         field=field,
+                        fastapi_value=fa_val,
+                        bentoml_value=bm_val,
+                        severity=severity,
+                        description=description,
+                    )
+                )
+
+        fa_lineage = fastapi_status.get("lineage") or {}
+        bm_lineage = bentoml_status.get("lineage") or {}
+        for field in LINEAGE_COMPARISON_FIELDS:
+            fa_val = fa_lineage.get(field) if fa_lineage else None
+            bm_val = bm_lineage.get(field) if bm_lineage else None
+            if fa_val != bm_val:
+                severity = CONSISTENCY_ERROR if field in CRITICAL_FIELDS else CONSISTENCY_WARNING
+                fa_display = _format_value(fa_val)
+                bm_display = _format_value(bm_val)
+                if field == "model_artifact_hash" and fa_val and bm_val:
+                    fa_display = fa_val[:16] + "..."
+                    bm_display = bm_val[:16] + "..."
+                description = f"lineage.{field}: FastAPI={fa_display} vs BentoML={bm_display}"
+                diffs.append(
+                    ConsistencyDiff(
+                        field=f"lineage.{field}",
                         fastapi_value=fa_val,
                         bentoml_value=bm_val,
                         severity=severity,
