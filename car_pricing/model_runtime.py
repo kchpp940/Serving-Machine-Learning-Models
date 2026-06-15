@@ -120,17 +120,6 @@ class CarPriceModel:
 
     # ---------- 元数据 ----------
 
-    DEFAULT_MODEL_NAME = "sklearn_gbr"
-    DEFAULT_CURRENCY = "USD"
-
-    @property
-    def model_name(self) -> str:
-        return self.DEFAULT_MODEL_NAME
-
-    @property
-    def currency(self) -> str:
-        return self.DEFAULT_CURRENCY
-
     @property
     def feature_order(self) -> list:
         return list(self.schema.feature_order)

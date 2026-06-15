@@ -1,436 +1,422 @@
+import os
 import streamlit as st
-import pandas as pd
-import uuid
-from copy import deepcopy
+import requests as re
+from datetime import datetime
 
-from api_client import (
-    API_BASE_URL,
-    SchemaResponse,
-    BatchTransportResponse,
-    BatchRowResult,
-    fetch_schema,
-    predict_batch,
-    get_default_values,
-    get_display_name,
-    validate_values,
-    format_value,
-    get_api_base_url,
-    build_fallback_schema,
-)
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+BENTOML_BASE_URL = os.environ.get("BENTOML_BASE_URL", "http://localhost:3000")
+REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
-st.set_page_config(page_title="Car Price Comparison", layout="wide")
+DEFAULT_SCHEMA = {
+    "feature_order": [
+        "enginesize", "curbweight", "horsepower", "highwaympg",
+        "carwidth", "wheelbase", "drivewheel", "citympg",
+        "boreratio", "cylindernumber",
+    ],
+    "numeric_features": [
+        "enginesize", "curbweight", "horsepower", "highwaympg",
+        "carwidth", "wheelbase", "citympg", "boreratio",
+    ],
+    "categorical_features": ["drivewheel", "cylindernumber"],
+    "target_column": "price",
+    "categorical_options": {
+        "drivewheel": [
+            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
+            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
+            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
+        ],
+        "cylindernumber": [
+            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
+            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
+            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
+            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
+            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
+            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
+            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
+        ],
+    },
+}
 
-
-def init_session_state(schema: dict):
-    if "scenario_ids" not in st.session_state:
-        st.session_state.scenario_ids = []
-    if "scenario_names" not in st.session_state:
-        st.session_state.scenario_names = {}
-    if "scenario_values" not in st.session_state:
-        st.session_state.scenario_values = {}
-    if "results" not in st.session_state:
-        st.session_state.results = {}
-    if "field_warnings" not in st.session_state:
-        st.session_state.field_warnings = {}
-    if "server_field_errors" not in st.session_state:
-        st.session_state.server_field_errors = {}
-    if "global_error" not in st.session_state:
-        st.session_state.global_error = None
-    if "global_info" not in st.session_state:
-        st.session_state.global_info = None
-    if "schema" not in st.session_state:
-        st.session_state.schema = schema
-
-    if not st.session_state.scenario_ids:
-        add_scenario(schema, name="Scenario 1")
-
-
-def add_scenario(schema: dict, name: str | None = None, source_id: str | None = None):
-    new_id = str(uuid.uuid4())[:8]
-    if name is None:
-        idx = len(st.session_state.scenario_ids) + 1
-        name = f"Scenario {idx}"
-    if source_id is not None and source_id in st.session_state.scenario_values:
-        values = deepcopy(st.session_state.scenario_values[source_id])
-    else:
-        values = get_default_values(schema)
-    st.session_state.scenario_ids.append(new_id)
-    st.session_state.scenario_names[new_id] = name
-    st.session_state.scenario_values[new_id] = values
-    return new_id
+FIELD_DISPLAY_NAMES = {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway Miles Per Gallon",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheel Base",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City Miles Per Gallon",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders",
+}
 
 
-def remove_scenario(scenario_id: str):
-    if scenario_id in st.session_state.scenario_ids:
-        st.session_state.scenario_ids.remove(scenario_id)
-    for key in ("scenario_names", "scenario_values", "results", "field_warnings", "server_field_errors"):
-        st.session_state[key].pop(scenario_id, None)
+@st.cache_data(show_spinner=False)
+def fetch_schema():
+    url = f"{API_BASE_URL.rstrip('/')}/schema"
+    try:
+        resp = re.get(url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        required = ["feature_order", "numeric_features", "categorical_features", "categorical_options"]
+        missing = [k for k in required if k not in data]
+        if missing:
+            return None, f"Schema missing fields: {', '.join(missing)}"
+        return data, None
+    except re.exceptions.ConnectionError:
+        return None, "Unable to connect to the prediction service to fetch schema."
+    except re.exceptions.Timeout:
+        return None, "Schema request timed out."
+    except re.exceptions.HTTPError as e:
+        detail = ""
+        try:
+            detail = resp.json().get("detail", "")
+        except Exception:
+            pass
+        return None, f"Server returned error when fetching schema: {detail or str(e)}"
+    except ValueError:
+        return None, "Schema response was not valid JSON."
+    except Exception as e:
+        return None, f"Unexpected error fetching schema: {str(e)}"
 
 
-def copy_scenario(schema: dict, scenario_id: str):
-    src_name = st.session_state.scenario_names.get(scenario_id, "Scenario")
-    add_scenario(schema, name=f"{src_name} (Copy)", source_id=scenario_id)
+def _get_json(url, label):
+    try:
+        resp = re.get(url, timeout=REQUEST_TIMEOUT)
+        if resp.status_code == 200:
+            return resp.json(), None
+        detail = ""
+        try:
+            detail = resp.json().get("detail", "")
+        except Exception:
+            pass
+        return None, f"{label} returned HTTP {resp.status_code}: {detail or resp.text}"
+    except re.exceptions.ConnectionError:
+        return None, f"Cannot connect to {label} at {url}"
+    except re.exceptions.Timeout:
+        return None, f"{label} request timed out"
+    except ValueError:
+        return None, f"{label} returned invalid JSON"
+    except Exception as e:
+        return None, f"{label} error: {str(e)}"
 
 
-def render_scenario_form(scenario_id: str, schema: dict, expanded: bool = True):
-    name = st.session_state.scenario_names.get(scenario_id, "")
-    values = st.session_state.scenario_values.get(scenario_id, {})
-    warnings = st.session_state.field_warnings.get(scenario_id, {})
-    server_errors = st.session_state.server_field_errors.get(scenario_id, {})
+@st.cache_data(show_spinner=False)
+def fetch_fastapi_status():
+    return _get_json(f"{API_BASE_URL.rstrip('/')}/status", "FastAPI /status")
 
+
+@st.cache_data(show_spinner=False)
+def fetch_fastapi_health():
+    return _get_json(f"{API_BASE_URL.rstrip('/')}/health", "FastAPI /health")
+
+
+@st.cache_data(show_spinner=False)
+def fetch_bentoml_status():
+    return _get_json(f"{BENTOML_BASE_URL.rstrip('/')}/status", "BentoML /status")
+
+
+@st.cache_data(show_spinner=False)
+def fetch_bentoml_health():
+    return _get_json(f"{BENTOML_BASE_URL.rstrip('/')}/health", "BentoML /health")
+
+
+def build_form(schema):
     feature_order = schema["feature_order"]
     numeric_features = set(schema["numeric_features"])
     categorical_features = set(schema["categorical_features"])
     categorical_options = schema["categorical_options"]
 
-    display_name = name or f"Scenario {scenario_id}"
-    result = st.session_state.results.get(scenario_id)
-    result_label = ""
-    if result and result.get("prediction") is not None:
-        result_label = f" · **${result['prediction']:,.2f}**"
-    elif result and result.get("error"):
-        result_label = " · ⚠️ Error"
-
-    with st.expander(f"📋 {display_name}{result_label}", expanded=expanded):
-        col_name, col_actions = st.columns([3, 1])
-        with col_name:
-            new_name = st.text_input(
-                "Scenario Name",
-                value=name,
-                key=f"name_{scenario_id}",
-                label_visibility="collapsed",
-            )
-            if new_name != name:
-                st.session_state.scenario_names[scenario_id] = new_name
-        with col_actions:
-            btn_cols = st.columns(2)
-            with btn_cols[0]:
-                if st.button("📑 Copy", key=f"copy_{scenario_id}", use_container_width=True):
-                    copy_scenario(schema, scenario_id)
-                    st.rerun()
-            with btn_cols[1]:
-                if st.button("🗑️ Remove", key=f"remove_{scenario_id}", use_container_width=True):
-                    if len(st.session_state.scenario_ids) <= 1:
-                        st.warning("At least one scenario must remain.")
-                    else:
-                        remove_scenario(scenario_id)
-                        st.rerun()
-
-        st.markdown("---")
-
-        n_cols = 2
-        cols = st.columns(n_cols)
-        for i, field in enumerate(feature_order):
-            with cols[i % n_cols]:
-                label = get_display_name(field, schema)
-                has_warning = field in warnings
-                has_error = field in server_errors
-                warning_msg = warnings.get(field, "")
-                error_msg = server_errors.get(field, "")
-
-                if has_error:
-                    st.markdown(f"<span style='color:#ff6b6b'>❌ {label} — {error_msg}</span>", unsafe_allow_html=True)
-                elif has_warning:
-                    st.markdown(f"<span style='color:#ffc107'>⚠️ {label} — {warning_msg}</span>", unsafe_allow_html=True)
-
-                current_val = values.get(field)
-                if field in numeric_features:
-                    step = 1.0 if field in ("enginesize", "curbweight", "horsepower", "highwaympg", "citympg") else 0.1
-                    val = st.number_input(
-                        label if not (has_warning or has_error) else " ",
-                        value=float(current_val) if current_val is not None else 0.0,
-                        step=step,
-                        key=f"num_{scenario_id}_{field}",
-                    )
-                    st.session_state.scenario_values[scenario_id][field] = val
-                elif field in categorical_features:
-                    opts = categorical_options.get(field, [])
-                    if opts:
-                        display_labels = [opt["display"] for opt in opts]
-                        form_values = [opt["form_value"] for opt in opts]
-                        current_idx = 0
-                        if current_val in form_values:
-                            current_idx = form_values.index(current_val)
-                        sel_idx = st.selectbox(
-                            label if not (has_warning or has_error) else " ",
-                            range(len(display_labels)),
-                            index=current_idx,
-                            format_func=lambda i, dl=display_labels: dl[i],
-                            key=f"cat_{scenario_id}_{field}",
-                        )
-                        st.session_state.scenario_values[scenario_id][field] = form_values[sel_idx]
-                    else:
-                        val = st.text_input(
-                            label if not (has_warning or has_error) else " ",
-                            value=str(current_val) if current_val is not None else "",
-                            key=f"textcat_{scenario_id}_{field}",
-                        )
-                        st.session_state.scenario_values[scenario_id][field] = val
-                else:
-                    val = st.text_input(
-                        label if not (has_warning or has_error) else " ",
-                        value=str(current_val) if current_val is not None else "",
-                        key=f"text_{scenario_id}_{field}",
-                    )
-                    st.session_state.scenario_values[scenario_id][field] = val
-
-        if result:
-            st.markdown("---")
-            if result.get("prediction") is not None:
-                st.success(f"✅ Predicted Price: **${result['prediction']:,.2f}**")
-            if result.get("error"):
-                err = result["error"]
-                fe = result.get("field_errors")
-                if fe:
-                    field_list = ", ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
-                    st.error(f"❌ {err} — {field_list}")
-                else:
-                    st.error(f"❌ {err}")
+    inputs = {}
+    for field in feature_order:
+        label = FIELD_DISPLAY_NAMES.get(field, field.replace("_", " ").title())
+        if field in numeric_features:
+            inputs[field] = st.number_input(label, value=0.0, step=0.1)
+        elif field in categorical_features:
+            options = categorical_options.get(field, [])
+            if not options:
+                inputs[field] = st.text_input(label)
+            else:
+                display_labels = [opt["display"] for opt in options]
+                selected_idx = st.selectbox(label, range(len(display_labels)), format_func=lambda i: display_labels[i])
+                inputs[field] = options[selected_idx]["form_value"]
+        else:
+            inputs[field] = st.text_input(label)
+    return inputs
 
 
-def find_differing_fields(result_ids: list[str], schema: dict) -> set[str]:
-    if len(result_ids) < 2:
-        return set()
-    differing: set[str] = set()
-    ref_id = result_ids[0]
-    ref_values = st.session_state.scenario_values.get(ref_id, {})
-    for sid in result_ids[1:]:
-        vals = st.session_state.scenario_values.get(sid, {})
-        for field in schema["feature_order"]:
-            if vals.get(field) != ref_values.get(field):
-                differing.add(field)
-    return differing
+def render_predict_page():
+    st.title("Car Price Prediction Web App")
 
+    st.write("""
+    ## About
 
-def render_comparison_table(schema: dict):
-    all_result_ids = [sid for sid in st.session_state.scenario_ids if sid in st.session_state.results]
-    if not all_result_ids:
-        return
+    **This Streamlit App utilizes a Machine Learning model served as an API to predict the price of a car based on certain features.**
 
-    results_with_data = []
-    for sid in all_result_ids:
-        r = st.session_state.results[sid]
-        results_with_data.append((sid, r))
+    """)
 
-    successful = [(sid, r) for sid, r in results_with_data if r.get("prediction") is not None]
-    successful.sort(key=lambda x: x[1]["prediction"])
-
-    all_ids = [sid for sid, _ in results_with_data]
-    differing_fields = find_differing_fields(all_ids, schema)
-
-    st.markdown("## 📊 Comparison Results")
-
-    failed = [(sid, r) for sid, r in results_with_data if r.get("error")]
-    if failed:
-        st.warning(f"{len(failed)} scenario(s) returned errors. Valid scenarios still predicted successfully.")
-
-    if successful:
-        table_data = []
-        for rank, (sid, r) in enumerate(successful, start=1):
-            row = {
-                "Rank": rank,
-                "Scenario": st.session_state.scenario_names.get(sid, sid),
-                "Predicted Price": f"${r['prediction']:,.2f}",
-            }
-            for field in schema["feature_order"]:
-                val = st.session_state.scenario_values.get(sid, {}).get(field, "")
-                display_val = format_value(field, val, schema)
-                if field in differing_fields:
-                    row[get_display_name(field, schema) + " 🔺"] = display_val
-                else:
-                    row[get_display_name(field, schema)] = display_val
-            table_data.append(row)
-
-        df = pd.DataFrame(table_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        if differing_fields:
-            st.info(
-                "🔺 Differing fields highlighted. "
-                f"{len(differing_fields)} field(s) vary across scenarios: "
-                + ", ".join(get_display_name(f, schema) for f in differing_fields)
-            )
-
-        if failed:
-            st.markdown("### ⚠️ Failed Scenarios")
-            error_data = []
-            for sid, r in failed:
-                fe = r.get("field_errors")
-                error_detail = r["error"]
-                if fe:
-                    field_list = "; ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
-                    error_detail = f"{error_detail} — {field_list}"
-                error_data.append({
-                    "Scenario": st.session_state.scenario_names.get(sid, sid),
-                    "Error": error_detail,
-                })
-            st.dataframe(pd.DataFrame(error_data), use_container_width=True, hide_index=True)
+    schema, schema_error = fetch_schema()
+    using_fallback = False
+    if schema_error is not None:
+        st.warning(f"{schema_error} Using default schema. The form may not match the server's expectations.")
+        schema = DEFAULT_SCHEMA
+        using_fallback = True
     else:
-        if failed:
-            st.error("No successful predictions. All scenarios have errors — see details below.")
-            error_data = []
-            for sid, r in failed:
-                fe = r.get("field_errors")
-                error_detail = r["error"]
-                if fe:
-                    field_list = "; ".join(f"{get_display_name(k, schema)}: {v}" for k, v in fe.items())
-                    error_detail = f"{error_detail} — {field_list}"
-                error_data.append({
-                    "Scenario": st.session_state.scenario_names.get(sid, sid),
-                    "Error": error_detail,
-                })
-            st.dataframe(pd.DataFrame(error_data), use_container_width=True, hide_index=True)
+        st.success(f"Loaded schema from {API_BASE_URL} ({len(schema['feature_order'])} features)")
+
+    st.header("Input Car Details")
+    names = st.text_input("Name of Car")
+
+    inputs = build_form(schema)
+
+    if st.button("Predict Price"):
+        if not names:
+            st.error("Please enter the name of the car.")
+            return
+
+        values = {}
+        for field in schema["feature_order"]:
+            values[field] = inputs[field]
+
+        url = f"{API_BASE_URL.rstrip('/')}/predict"
+        try:
+            res = re.post(url, json=values, timeout=REQUEST_TIMEOUT)
+            res.raise_for_status()
+            body = res.json()
+            prediction = body.get("prediction")
+            if prediction is None:
+                st.error(f"Unexpected response format from server: {body}")
+            else:
+                st.success(f"The Price of the {names} is {prediction:.2f}$")
+        except re.exceptions.ConnectionError:
+            st.error("Unable to connect to the prediction service. Please check that the API server is running.")
+        except re.exceptions.Timeout:
+            st.error("The request to the prediction service timed out. Please try again later.")
+        except re.exceptions.HTTPError as e:
+            detail = ""
+            try:
+                detail = res.json().get("detail", "")
+            except Exception:
+                pass
+            st.error(f"Server returned an error ({res.status_code}): {detail or str(e)}")
+        except ValueError:
+            st.error("The server returned an invalid response. Please try again later.")
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {str(e)}")
 
 
-def run_client_side_validation(schema: dict) -> bool:
-    st.session_state.field_warnings = {}
-    has_any_warning = False
-    for sid in st.session_state.scenario_ids:
-        values = st.session_state.scenario_values.get(sid, {})
-        name = st.session_state.scenario_names.get(sid, "")
-        warns = {}
-        if not name:
-            warns["__name__"] = "Scenario name is required"
-            has_any_warning = True
-        field_warns = validate_values(values, schema)
-        if field_warns:
-            warns.update(field_warns)
-            has_any_warning = True
-        if warns:
-            st.session_state.field_warnings[sid] = warns
-    return has_any_warning
+def _render_health_badge(name, health_data, health_error):
+    if health_error:
+        st.error(f"**{name}**: ❌ Unreachable — {health_error}")
+        return False
+    status = health_data.get("status", "unknown") if health_data else "unknown"
+    model_loaded = health_data.get("model_loaded", False) if health_data else False
+    if status == "healthy" and model_loaded:
+        st.success(f"**{name}**: ✅ Healthy (model loaded)")
+        return True
+    elif status == "healthy":
+        st.warning(f"**{name}**: ⚠️ Healthy but model not loaded")
+        return False
+    else:
+        err = health_data.get("error", "unknown error") if health_data else "unknown"
+        st.error(f"**{name}**: ❌ Unhealthy — {err}")
+        return False
 
 
-def run_prediction_batch(schema: dict):
-    st.session_state.global_error = None
-    st.session_state.global_info = None
-    st.session_state.server_field_errors = {}
+def _render_status_card(name, status_data, status_error):
+    if status_error:
+        st.error(f"**{name} Status** — unavailable: {status_error}")
+        return None
+    with st.expander(f"{name} Status Details", expanded=True):
+        st.json(status_data)
+    return status_data
 
-    has_warnings = run_client_side_validation(schema)
 
-    rows = []
-    row_ids = []
-    for sid in st.session_state.scenario_ids:
-        values = st.session_state.scenario_values.get(sid, {})
-        rows.append(deepcopy(values))
-        row_ids.append(sid)
+def _compare_schemas(fastapi_status, bentoml_status):
+    st.subheader("Schema Consistency Check")
+    fa_sv = fastapi_status.get("schema_version", "N/A") if fastapi_status else "N/A"
+    bm_sv = bentoml_status.get("schema_version", "N/A") if bentoml_status else "N/A"
+    fa_dv = fastapi_status.get("data_version", "N/A") if fastapi_status else "N/A"
+    bm_dv = bentoml_status.get("data_version", "N/A") if bentoml_status else "N/A"
+    fa_nf = fastapi_status.get("n_features", "N/A") if fastapi_status else "N/A"
+    bm_nf = bentoml_status.get("n_features", "N/A") if bentoml_status else "N/A"
 
-    with st.spinner(f"Running batch prediction for {len(rows)} scenario(s)..."):
-        batch_response: BatchTransportResponse = predict_batch(rows=rows, row_ids=row_ids)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        schema_match = fa_sv == bm_sv and fa_sv != "N/A"
+        st.metric(
+            label="schema_version",
+            value=fa_sv[:8] if fa_sv != "N/A" else "N/A",
+            delta=f"Match" if schema_match else f"BentoML={bm_sv[:8] if bm_sv != 'N/A' else 'N/A'}",
+            delta_color="normal" if schema_match else "inverse",
+        )
+    with col2:
+        data_match = fa_dv == bm_dv and fa_dv != "N/A"
+        st.metric(
+            label="data_version",
+            value=fa_dv[:8] if fa_dv != "N/A" else "N/A",
+            delta=f"Match" if data_match else f"BentoML={bm_dv[:8] if bm_dv != 'N/A' else 'N/A'}",
+            delta_color="normal" if data_match else "inverse",
+        )
+    with col3:
+        nf_match = fa_nf == bm_nf and fa_nf != "N/A"
+        st.metric(
+            label="n_features",
+            value=str(fa_nf),
+            delta=f"Match" if nf_match else f"BentoML={bm_nf}",
+            delta_color="normal" if nf_match else "inverse",
+        )
 
-    if batch_response.transport_error:
-        st.session_state.global_error = batch_response.transport_error
-        if has_warnings:
-            st.session_state.global_info = (
-                "Client-side validation also found issues in some scenarios, "
-                "but the primary issue is the service connection."
-            )
+    if schema_match and data_match and nf_match:
+        st.success("✅ FastAPI and BentoML schemas are consistent")
+    else:
+        st.warning("⚠️ Schema mismatch detected between FastAPI and BentoML — verify model artifacts")
+
+    fa_features = fastapi_status.get("feature_order") if fastapi_status else None
+    bm_features = bentoml_status.get("feature_order") if bentoml_status else None
+    if fa_features and bm_features and fa_features != bm_features:
+        st.error(f"Feature order mismatch:\n- FastAPI: {fa_features}\n- BentoML: {bm_features}")
+
+
+def _render_model_lineage(fastapi_status, bentoml_status):
+    st.subheader("Model Lineage")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("##### FastAPI")
+        if fastapi_status:
+            st.write(f"- **API Version**: `{fastapi_status.get('api_version', 'N/A')}`")
+            st.write(f"- **Service Type**: `{fastapi_status.get('service_type', 'N/A')}`")
+            st.write(f"- **Model Mode**: `{fastapi_status.get('model_mode', 'N/A')}`")
+            st.write(f"- **Model Loaded**: `{fastapi_status.get('model_loaded', False)}`")
+            st.write(f"- **Schema Version**: `{fastapi_status.get('schema_version', 'N/A')}`")
+            st.write(f"- **Data Version**: `{fastapi_status.get('data_version', 'N/A')}`")
+            st.write(f"- **N Features**: `{fastapi_status.get('n_features', 'N/A')}`")
+            api_base = fastapi_status.get('api_base_suggestion', 'N/A')
+            st.write(f"- **API Base Suggestion**: `{api_base}`")
+        else:
+            st.write("No FastAPI status data available")
+    with col2:
+        st.markdown("##### BentoML")
+        if bentoml_status:
+            st.write(f"- **API Version**: `{bentoml_status.get('api_version', 'N/A')}`")
+            st.write(f"- **Service Type**: `{bentoml_status.get('service_type', 'N/A')}`")
+            st.write(f"- **Model Mode**: `{bentoml_status.get('model_mode', 'N/A')}`")
+            st.write(f"- **Model Loaded**: `{bentoml_status.get('model_loaded', False)}`")
+            st.write(f"- **Schema Version**: `{bentoml_status.get('schema_version', 'N/A')}`")
+            st.write(f"- **Data Version**: `{bentoml_status.get('data_version', 'N/A')}`")
+            st.write(f"- **N Features**: `{bentoml_status.get('n_features', 'N/A')}`")
+            api_base = bentoml_status.get('api_base_suggestion', 'N/A')
+            st.write(f"- **API Base Suggestion**: `{api_base}`")
+        else:
+            st.write("No BentoML status data available")
+
+
+def _render_self_check(name, status_data):
+    if not status_data:
         return
+    check = status_data.get("last_self_check")
+    if not check:
+        st.write(f"_{name}: no self-check data_")
+        return
+    passed = check.get("passed", False)
+    ts = check.get("timestamp")
+    ts_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown"
+    st.markdown(f"##### {name} Self-Check — {'✅ Passed' if passed else '❌ Failed'} at {ts_str}")
+    checks = check.get("checks", [])
+    if checks:
+        check_rows = [
+            {
+                "Check": c.get("name", "?"),
+                "Passed": "✅" if c.get("passed") else "❌",
+                "Detail": c.get("detail", ""),
+            }
+            for c in checks
+        ]
+        st.table(check_rows)
+    errors = check.get("errors", [])
+    if errors:
+        st.error(f"{name} Errors:\n" + "\n".join(f"- {e}" for e in errors))
 
-    for row_result in batch_response.results:
-        sid = row_result.row_id
-        if sid is None:
-            continue
-        result_data = {
-            "prediction": row_result.prediction,
-            "error": row_result.error,
-            "field_errors": row_result.field_errors,
-        }
-        st.session_state.results[sid] = result_data
-        if row_result.field_errors:
-            st.session_state.server_field_errors[sid] = dict(row_result.field_errors)
 
-    success = batch_response.success_count
-    errors = batch_response.error_count
-    total = batch_response.total_count
+def _render_error_details(fastapi_health_err, bentoml_health_err, fastapi_status_err, bentoml_status_err,
+                           fastapi_status, bentoml_status):
+    st.subheader("Error Details")
+    any_error = False
+    if fastapi_health_err:
+        st.error(f"FastAPI /health: {fastapi_health_err}")
+        any_error = True
+    if bentoml_health_err:
+        st.error(f"BentoML /health: {bentoml_health_err}")
+        any_error = True
+    if fastapi_status_err:
+        st.error(f"FastAPI /status: {fastapi_status_err}")
+        any_error = True
+    if bentoml_status_err:
+        st.error(f"BentoML /status: {bentoml_status_err}")
+        any_error = True
 
-    if success > 0 and errors == 0:
-        st.session_state.global_info = f"✅ All {success} prediction(s) succeeded."
-    elif success > 0 and errors > 0:
-        st.session_state.global_info = (
-            f"✅ {success} succeeded, ⚠️ {errors} failed. "
-            "Invalid scenarios are shown with errors; valid ones still predicted."
-        )
-    elif errors == total and total > 0:
-        st.session_state.global_error = (
-            f"⚠️ All {errors} scenario(s) failed. "
-            "Check the field errors in each scenario and try again."
-        )
+    for name, s in [("FastAPI", fastapi_status), ("BentoML", bentoml_status)]:
+        if s:
+            sc = s.get("last_self_check", {})
+            errs = sc.get("errors", [])
+            if errs:
+                for e in errs:
+                    st.error(f"{name} self-check: {e}")
+                    any_error = True
+    if not any_error:
+        st.success("No errors detected across all services")
 
-    if has_warnings and success > 0:
-        if not st.session_state.global_info:
-            st.session_state.global_info = (
-                "Some scenarios have client-side warnings but were still submitted. "
-                "The server validated and processed valid rows independently."
-            )
+
+def render_system_status_page():
+    st.title("System Status Dashboard")
+    st.write(f"FastAPI endpoint: `{API_BASE_URL}`  |  BentoML endpoint: `{BENTOML_BASE_URL}`")
+
+    if st.button("🔄 Refresh Status"):
+        fetch_fastapi_status.clear()
+        fetch_fastapi_health.clear()
+        fetch_bentoml_status.clear()
+        fetch_bentoml_health.clear()
+        st.experimental_rerun()
+
+    st.header("Service Health")
+    col1, col2 = st.columns(2)
+    with col1:
+        fa_health, fa_health_err = fetch_fastapi_health()
+        fa_ok = _render_health_badge("FastAPI", fa_health, fa_health_err)
+    with col2:
+        bm_health, bm_health_err = fetch_bentoml_health()
+        bm_ok = _render_health_badge("BentoML", bm_health, bm_health_err)
+
+    st.header("Aggregated Status")
+    col1, col2 = st.columns(2)
+    with col1:
+        fa_status, fa_status_err = fetch_fastapi_status()
+        _render_status_card("FastAPI", fa_status, fa_status_err)
+    with col2:
+        bm_status, bm_status_err = fetch_bentoml_status()
+        _render_status_card("BentoML", bm_status, bm_status_err)
+
+    st.header("Model Lineage & Schema")
+    _render_model_lineage(fa_status, bm_status)
+    _compare_schemas(fa_status, bm_status)
+
+    st.header("Self-Check Results")
+    col1, col2 = st.columns(2)
+    with col1:
+        _render_self_check("FastAPI", fa_status)
+    with col2:
+        _render_self_check("BentoML", bm_status)
+
+    _render_error_details(fa_health_err, bm_health_err, fa_status_err, bm_status_err,
+                          fa_status, bm_status)
 
 
 def main():
-    st.title("🚗 Car Price — Scenario Comparison")
-    st.markdown(
-        "Compare multiple vehicle configurations side-by-side. "
-        "Add scenarios, copy existing ones, tweak a few fields, and predict all at once. "
-        "Valid scenarios always predict even if some have errors."
-    )
-
-    with st.spinner("Loading feature schema from prediction service..."):
-        schema_resp: SchemaResponse = fetch_schema()
-
-    if schema_resp.error and schema_resp.using_fallback:
-        st.warning(
-            f"{schema_resp.error} Using built-in fallback schema. "
-            "The form may not match the server's expectations until the service is reachable."
-        )
-        schema = schema_resp.schema
+    page = st.sidebar.radio("Navigation", ["Prediction", "System Status"])
+    if page == "Prediction":
+        render_predict_page()
     else:
-        base_url = get_api_base_url()
-        feat_count = len(schema_resp.schema.get("feature_order", [])) if schema_resp.schema else 0
-        st.success(f"✅ Schema loaded from `{base_url}` ({feat_count} features)")
-        schema = schema_resp.schema
-
-    if schema is None:
-        schema = build_fallback_schema()
-
-    init_session_state(schema)
-
-    if st.session_state.global_error:
-        st.error(st.session_state.global_error)
-    if st.session_state.global_info:
-        st.info(st.session_state.global_info)
-
-    st.markdown("---")
-
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 2])
-    with ctrl_col1:
-        if st.button("➕ Add Scenario", use_container_width=True):
-            add_scenario(schema)
-            st.rerun()
-    with ctrl_col2:
-        if st.button("🔄 Reset All", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-    with ctrl_col3:
-        st.markdown(
-            f"<div style='text-align:right; padding-top:8px; color:#666'>"
-            f"{len(st.session_state.scenario_ids)} scenario(s) configured</div>",
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("---")
-
-    for i, sid in enumerate(st.session_state.scenario_ids):
-        render_scenario_form(sid, schema, expanded=(i < 2))
-
-    st.markdown("---")
-
-    pred_col, _ = st.columns([1, 3])
-    with pred_col:
-        if st.button("🚀 Predict All Scenarios", type="primary", use_container_width=True):
-            run_prediction_batch(schema)
-            st.rerun()
-
-    render_comparison_table(schema)
+        render_system_status_page()
 
 
 if __name__ == "__main__":

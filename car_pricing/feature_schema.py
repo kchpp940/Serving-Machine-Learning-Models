@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
@@ -54,19 +54,6 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
     "4wd": "Four Wheel Drive (4WD)",
     "fwd": "Front Wheel Drive (FWD)",
     "rwd": "Rear Wheel Drive (RWD)",
-}
-
-FIELD_DISPLAY_NAMES: Dict[str, str] = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway MPG",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheel Base",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City MPG",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
 }
 
 
@@ -237,69 +224,6 @@ class FeatureSchema:
             raise RuntimeError(
                 f"模型期望 n_features_in_={n_features} 但 schema 有 {self.n_features()} 个特征"
             )
-
-    def get_display_name(self, field_name: str) -> str:
-        if field_name in FIELD_DISPLAY_NAMES:
-            return FIELD_DISPLAY_NAMES[field_name]
-        return field_name.replace("_", " ").title()
-
-    def to_api_dict(self) -> dict:
-        base = self.to_dict()
-        base["categorical_options"] = {
-            f: self.categorical_options(f) for f in self.categorical_features
-            if f in self.categorical_encoders
-        }
-        base["display_names"] = {
-            f: self.get_display_name(f) for f in self.feature_order
-        }
-        return base
-
-    def get_default_values(self) -> Dict[str, Any]:
-        from typing import Any as _Any
-        defaults: Dict[str, _Any] = {}
-        numeric_set = set(self.numeric_features)
-        categorical_set = set(self.categorical_features)
-        categorical_options = {
-            f: self.categorical_options(f) for f in self.categorical_features
-            if f in self.categorical_encoders
-        }
-        for field_name in self.feature_order:
-            if field_name in numeric_set:
-                defaults[field_name] = 0.0
-            elif field_name in categorical_set:
-                opts = categorical_options.get(field_name, [])
-                if opts:
-                    defaults[field_name] = opts[0]["form_value"]
-                else:
-                    defaults[field_name] = ""
-            else:
-                defaults[field_name] = ""
-        return defaults
-
-    @classmethod
-    def default_with_encoders(cls) -> "FeatureSchema":
-        if LabelEncoder is None:
-            raise RuntimeError("需要 scikit-learn 才能使用 default_with_encoders")
-        schema = cls()
-        schema.categorical_encoders = cls._build_default_encoders()
-        return schema
-
-    @classmethod
-    def _build_default_encoders(cls) -> Dict[str, "LabelEncoder"]:
-        if LabelEncoder is None:
-            return {}
-        legacy_classes = {
-            "drivewheel": np.array(["4wd", "fwd", "rwd"]),
-            "cylindernumber": np.array(
-                ["eight", "five", "four", "six", "three", "twelve", "two"]
-            ),
-        }
-        encoders = {}
-        for col, classes in legacy_classes.items():
-            lb = LabelEncoder()
-            lb.fit(classes.astype(str))
-            encoders[col] = lb
-        return encoders
 
 
 def _display_name(field_name: str, raw_class: str) -> str:
