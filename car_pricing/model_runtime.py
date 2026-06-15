@@ -14,10 +14,11 @@ from car_pricing.feature_schema import (
     is_model_bundle,
 )
 from car_pricing.prediction_protocol import (
-    PREDICTION_CURRENCY,
+    PredictionResult,
     ExplainResult,
-    GlobalFeatureImportance,
-    InputFeatureValue,
+    build_prediction_result,
+    build_explain_result,
+    PREDICTION_CURRENCY,
 )
 
 try:
@@ -173,11 +174,19 @@ class CarPriceModel:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
 
+    def predict_result(self, values: dict) -> PredictionResult:
+        prediction = float(self.predict_raw(values)[0])
+        return build_prediction_result(
+            prediction=prediction,
+            model_name=self.model_name,
+            currency=PREDICTION_CURRENCY,
+        )
+
     # ---------- FastAPI 兼容层 ----------
 
-    def predict_from_pydantic(self, data) -> np.ndarray:
-        encoded = {f: self.encode_feature(f, getattr(data, f)) for f in self.feature_order}
-        return self.predict_encoded(encoded)
+    def predict_from_pydantic(self, data) -> PredictionResult:
+        values = {f: getattr(data, f) for f in self.feature_order}
+        return self.predict_result(values)
 
     # ---------- 模型解释 ----------
 
@@ -205,34 +214,16 @@ class CarPriceModel:
         prediction = float(self.predict_raw(values)[0])
         importances = self.feature_importances()
 
-        all_features = []
-        for feature in self.feature_order:
-            all_features.append(GlobalFeatureImportance(
-                feature=feature,
-                label=self.schema.label(feature),
-                global_importance=importances[feature],
-                global_importance_percent=round(importances[feature] * 100, 2),
-            ))
-
-        all_features.sort(key=lambda x: x.global_importance, reverse=True)
-
-        top_features = all_features[:top_k] if top_k and top_k > 0 else all_features
-
-        feature_values = {}
-        for feature in self.feature_order:
-            raw_value = values.get(feature)
-            feature_values[feature] = InputFeatureValue(
-                value=raw_value,
-                label=self.schema.label(feature),
-                display=self.schema.display_value(feature, raw_value),
-            )
-
-        return ExplainResult(
+        return build_explain_result(
             prediction=prediction,
-            currency=PREDICTION_CURRENCY,
             model_name=self.model_name,
-            top_features=top_features,
-            feature_values=feature_values,
+            feature_order=self.feature_order,
+            importances=importances,
+            values=values,
+            label_fn=self.schema.label,
+            display_fn=self.schema.display_value,
+            top_k=top_k,
+            currency=PREDICTION_CURRENCY,
         )
 
     def explain_from_pydantic(self, data, top_k: int = 5) -> ExplainResult:

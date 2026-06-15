@@ -9,9 +9,23 @@ from pydantic import BaseModel, Field
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
 from car_pricing.prediction_protocol import (
     PREDICTION_CURRENCY,
+    GLOBAL_IMPORTANCE_DESCRIPTION,
+    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
+    EXPLAIN_TOP_FEATURES_DESCRIPTION,
+    EXPLAIN_FEATURE_VALUES_DESCRIPTION,
+    FIELD_PREDICTION,
+    FIELD_CURRENCY,
+    FIELD_MODEL_NAME,
+    FIELD_TOP_FEATURES,
+    FIELD_FEATURE_VALUES,
+    FIELD_FEATURE,
+    FIELD_LABEL,
+    FIELD_VALUE,
+    FIELD_DISPLAY,
+    FIELD_GLOBAL_IMPORTANCE,
+    FIELD_GLOBAL_IMPORTANCE_PERCENT,
+    PredictionResult,
     ExplainResult,
-    GlobalFeatureImportance as GlobalFeatureImportanceProto,
-    InputFeatureValue as InputFeatureValueProto,
 )
 
 
@@ -45,9 +59,9 @@ class CarPrediction(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    prediction: float = Field(description=ExplainResult.PREDICTION_DESCRIPTION)
-    currency: str = Field(default=PREDICTION_CURRENCY, description=ExplainResult.CURRENCY_DESCRIPTION)
-    model_name: str = Field(description=ExplainResult.MODEL_NAME_DESCRIPTION)
+    prediction: float = Field(description="Predicted car price")
+    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
+    model_name: str = Field(description="Name of the ML model that produced the prediction")
 
     class Config:
         schema_extra = {
@@ -58,12 +72,20 @@ class PredictionResponse(BaseModel):
             }
         }
 
+    @classmethod
+    def from_protocol(cls, result: PredictionResult) -> "PredictionResponse":
+        return cls(
+            prediction=result.prediction,
+            currency=result.currency,
+            model_name=result.model_name,
+        )
+
 
 class GlobalFeatureImportance(BaseModel):
-    feature: str = Field(description=GlobalFeatureImportanceProto.FEATURE_DESCRIPTION)
-    label: str = Field(description=GlobalFeatureImportanceProto.LABEL_DESCRIPTION)
-    global_importance: float = Field(description=GlobalFeatureImportanceProto.GLOBAL_IMPORTANCE_DESCRIPTION)
-    global_importance_percent: float = Field(description=GlobalFeatureImportanceProto.GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION)
+    feature: str = Field(description="Internal feature code name")
+    label: str = Field(description="Human-readable feature label from the shared feature schema")
+    global_importance: float = Field(description=GLOBAL_IMPORTANCE_DESCRIPTION)
+    global_importance_percent: float = Field(description=GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -75,11 +97,20 @@ class GlobalFeatureImportance(BaseModel):
             }
         }
 
+    @classmethod
+    def from_protocol(cls, item) -> "GlobalFeatureImportance":
+        return cls(
+            feature=item.feature,
+            label=item.label,
+            global_importance=item.global_importance,
+            global_importance_percent=item.global_importance_percent,
+        )
+
 
 class InputFeatureValue(BaseModel):
-    value: Any = Field(description=InputFeatureValueProto.VALUE_DESCRIPTION)
-    label: str = Field(description=InputFeatureValueProto.LABEL_DESCRIPTION)
-    display: str = Field(description=InputFeatureValueProto.DISPLAY_DESCRIPTION)
+    value: Any = Field(description="Original input feature value")
+    label: str = Field(description="Human-readable feature label from the shared feature schema")
+    display: str = Field(description="Human-readable feature value representation")
 
     class Config:
         schema_extra = {
@@ -90,13 +121,21 @@ class InputFeatureValue(BaseModel):
             }
         }
 
+    @classmethod
+    def from_protocol(cls, item) -> "InputFeatureValue":
+        return cls(
+            value=item.value,
+            label=item.label,
+            display=item.display,
+        )
+
 
 class ExplainResponse(BaseModel):
-    prediction: float = Field(description=ExplainResult.PREDICTION_DESCRIPTION)
-    currency: str = Field(default=PREDICTION_CURRENCY, description=ExplainResult.CURRENCY_DESCRIPTION)
-    model_name: str = Field(description=ExplainResult.MODEL_NAME_DESCRIPTION)
-    top_features: List[GlobalFeatureImportance] = Field(description=ExplainResult.TOP_FEATURES_DESCRIPTION)
-    feature_values: Dict[str, InputFeatureValue] = Field(description=ExplainResult.FEATURE_VALUES_DESCRIPTION)
+    prediction: float = Field(description="Predicted car price")
+    currency: str = Field(default=PREDICTION_CURRENCY, description="Currency code of the predicted price")
+    model_name: str = Field(description="Name of the ML model that produced the prediction")
+    top_features: List[GlobalFeatureImportance] = Field(description=EXPLAIN_TOP_FEATURES_DESCRIPTION)
+    feature_values: Dict[str, InputFeatureValue] = Field(description=EXPLAIN_FEATURE_VALUES_DESCRIPTION)
 
     class Config:
         schema_extra = {
@@ -124,3 +163,19 @@ class ExplainResponse(BaseModel):
                 },
             }
         }
+
+    @classmethod
+    def from_protocol(cls, result: ExplainResult) -> "ExplainResponse":
+        return cls(
+            prediction=result.prediction,
+            currency=result.currency,
+            model_name=result.model_name,
+            top_features=[
+                GlobalFeatureImportance.from_protocol(item)
+                for item in result.top_features
+            ],
+            feature_values={
+                k: InputFeatureValue.from_protocol(v)
+                for k, v in result.feature_values.items()
+            },
+        )

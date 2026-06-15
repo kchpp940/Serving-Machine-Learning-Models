@@ -12,17 +12,6 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
-from car_pricing.prediction_protocol import (
-    PREDICTION_CURRENCY,
-    GLOBAL_IMPORTANCE_DESCRIPTION,
-    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
-    EXPLAIN_TOP_FEATURES_DESCRIPTION,
-    EXPLAIN_FEATURE_VALUES_DESCRIPTION,
-    GlobalFeatureImportance,
-    InputFeatureValue,
-    ExplainResult,
-)
-
 __all__ = [
     "FeatureSchema",
     "FEATURE_ORDER",
@@ -34,12 +23,4 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "PREDICTION_CURRENCY",
-    "GLOBAL_IMPORTANCE_DESCRIPTION",
-    "GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION",
-    "EXPLAIN_TOP_FEATURES_DESCRIPTION",
-    "EXPLAIN_FEATURE_VALUES_DESCRIPTION",
-    "GlobalFeatureImportance",
-    "InputFeatureValue",
-    "ExplainResult",
 ]

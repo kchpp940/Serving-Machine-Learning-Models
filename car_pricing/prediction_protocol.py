@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Dict, List, Any
 
 
 PREDICTION_CURRENCY: str = "USD"
+
+
+FIELD_PREDICTION: str = "prediction"
+FIELD_CURRENCY: str = "currency"
+FIELD_MODEL_NAME: str = "model_name"
+FIELD_TOP_FEATURES: str = "top_features"
+FIELD_FEATURE_VALUES: str = "feature_values"
+FIELD_FEATURE: str = "feature"
+FIELD_LABEL: str = "label"
+FIELD_VALUE: str = "value"
+FIELD_DISPLAY: str = "display"
+FIELD_GLOBAL_IMPORTANCE: str = "global_importance"
+FIELD_GLOBAL_IMPORTANCE_PERCENT: str = "global_importance_percent"
+
 
 GLOBAL_IMPORTANCE_DESCRIPTION: str = (
     "Model-level feature importance score (normalized, sum = 1). "
@@ -25,148 +39,194 @@ EXPLAIN_FEATURE_VALUES_DESCRIPTION: str = (
     "Each entry carries the raw value, the feature display label, and a human-readable value string."
 )
 
+PREDICTION_RESPONSE_FIELDS = (FIELD_PREDICTION, FIELD_CURRENCY, FIELD_MODEL_NAME)
+EXPLAIN_RESPONSE_FIELDS = (
+    FIELD_PREDICTION, FIELD_CURRENCY, FIELD_MODEL_NAME,
+    FIELD_TOP_FEATURES, FIELD_FEATURE_VALUES,
+)
+GLOBAL_FEATURE_IMPORTANCE_FIELDS = (
+    FIELD_FEATURE, FIELD_LABEL,
+    FIELD_GLOBAL_IMPORTANCE, FIELD_GLOBAL_IMPORTANCE_PERCENT,
+)
+INPUT_FEATURE_VALUE_FIELDS = (FIELD_VALUE, FIELD_LABEL, FIELD_DISPLAY)
+
 
 @dataclass
-class GlobalFeatureImportance:
-    feature: str = ""
-    label: str = ""
-    global_importance: float = 0.0
-    global_importance_percent: float = 0.0
+class GlobalFeatureImportanceItem:
+    feature: str
+    label: str
+    global_importance: float
+    global_importance_percent: float
 
-    FEATURE_DESCRIPTION: str = field(
-        default="Internal feature code name",
-        init=False,
-        repr=False,
-    )
-    LABEL_DESCRIPTION: str = field(
-        default="Human-readable feature label from the shared feature schema",
-        init=False,
-        repr=False,
-    )
-    GLOBAL_IMPORTANCE_DESCRIPTION: str = field(
-        default=GLOBAL_IMPORTANCE_DESCRIPTION,
-        init=False,
-        repr=False,
-    )
-    GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION: str = field(
-        default=GLOBAL_IMPORTANCE_PERCENT_DESCRIPTION,
-        init=False,
-        repr=False,
-    )
-
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         return {
-            "feature": self.feature,
-            "label": self.label,
-            "global_importance": self.global_importance,
-            "global_importance_percent": self.global_importance_percent,
+            FIELD_FEATURE: self.feature,
+            FIELD_LABEL: self.label,
+            FIELD_GLOBAL_IMPORTANCE: self.global_importance,
+            FIELD_GLOBAL_IMPORTANCE_PERCENT: self.global_importance_percent,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "GlobalFeatureImportance":
+    def from_dict(cls, data: Dict[str, Any]) -> "GlobalFeatureImportanceItem":
         return cls(
-            feature=data.get("feature", ""),
-            label=data.get("label", ""),
-            global_importance=float(data.get("global_importance", 0.0)),
-            global_importance_percent=float(data.get("global_importance_percent", 0.0)),
+            feature=data[FIELD_FEATURE],
+            label=data[FIELD_LABEL],
+            global_importance=float(data[FIELD_GLOBAL_IMPORTANCE]),
+            global_importance_percent=float(data[FIELD_GLOBAL_IMPORTANCE_PERCENT]),
         )
 
 
 @dataclass
-class InputFeatureValue:
-    value: Any = None
-    label: str = ""
-    display: str = ""
+class InputFeatureValueItem:
+    value: Any
+    label: str
+    display: str
 
-    VALUE_DESCRIPTION: str = field(
-        default="Original input feature value",
-        init=False,
-        repr=False,
-    )
-    LABEL_DESCRIPTION: str = field(
-        default="Human-readable feature label from the shared feature schema",
-        init=False,
-        repr=False,
-    )
-    DISPLAY_DESCRIPTION: str = field(
-        default="Human-readable feature value representation",
-        init=False,
-        repr=False,
-    )
-
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         return {
-            "value": self.value,
-            "label": self.label,
-            "display": self.display,
+            FIELD_VALUE: self.value,
+            FIELD_LABEL: self.label,
+            FIELD_DISPLAY: self.display,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "InputFeatureValue":
+    def from_dict(cls, data: Dict[str, Any]) -> "InputFeatureValueItem":
         return cls(
-            value=data.get("value"),
-            label=data.get("label", ""),
-            display=data.get("display", ""),
+            value=data[FIELD_VALUE],
+            label=data[FIELD_LABEL],
+            display=str(data[FIELD_DISPLAY]),
+        )
+
+
+@dataclass
+class PredictionResult:
+    prediction: float
+    currency: str = PREDICTION_CURRENCY
+    model_name: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            FIELD_PREDICTION: self.prediction,
+            FIELD_CURRENCY: self.currency,
+            FIELD_MODEL_NAME: self.model_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PredictionResult":
+        return cls(
+            prediction=float(data[FIELD_PREDICTION]),
+            currency=str(data.get(FIELD_CURRENCY, PREDICTION_CURRENCY)),
+            model_name=str(data.get(FIELD_MODEL_NAME, "")),
         )
 
 
 @dataclass
 class ExplainResult:
-    prediction: float = 0.0
+    prediction: float
     currency: str = PREDICTION_CURRENCY
     model_name: str = ""
-    top_features: List[GlobalFeatureImportance] = field(default_factory=list)
-    feature_values: Dict[str, InputFeatureValue] = field(default_factory=dict)
+    top_features: List[GlobalFeatureImportanceItem] = field(default_factory=list)
+    feature_values: Dict[str, InputFeatureValueItem] = field(default_factory=dict)
 
-    PREDICTION_DESCRIPTION: str = field(
-        default="Predicted car price",
-        init=False,
-        repr=False,
-    )
-    CURRENCY_DESCRIPTION: str = field(
-        default="Currency code of the predicted price",
-        init=False,
-        repr=False,
-    )
-    MODEL_NAME_DESCRIPTION: str = field(
-        default="Name of the ML model that produced the prediction",
-        init=False,
-        repr=False,
-    )
-    TOP_FEATURES_DESCRIPTION: str = field(
-        default=EXPLAIN_TOP_FEATURES_DESCRIPTION,
-        init=False,
-        repr=False,
-    )
-    FEATURE_VALUES_DESCRIPTION: str = field(
-        default=EXPLAIN_FEATURE_VALUES_DESCRIPTION,
-        init=False,
-        repr=False,
-    )
-
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         return {
-            "prediction": self.prediction,
-            "currency": self.currency,
-            "model_name": self.model_name,
-            "top_features": [f.to_dict() for f in self.top_features],
-            "feature_values": {k: v.to_dict() for k, v in self.feature_values.items()},
+            FIELD_PREDICTION: self.prediction,
+            FIELD_CURRENCY: self.currency,
+            FIELD_MODEL_NAME: self.model_name,
+            FIELD_TOP_FEATURES: [item.to_dict() for item in self.top_features],
+            FIELD_FEATURE_VALUES: {k: v.to_dict() for k, v in self.feature_values.items()},
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ExplainResult":
-        top_features = [
-            GlobalFeatureImportance.from_dict(f)
-            for f in data.get("top_features", [])
-        ]
-        feature_values = {
-            k: InputFeatureValue.from_dict(v)
-            for k, v in data.get("feature_values", {}).items()
-        }
+    def from_dict(cls, data: Dict[str, Any]) -> "ExplainResult":
         return cls(
-            prediction=float(data.get("prediction", 0.0)),
-            currency=data.get("currency", PREDICTION_CURRENCY),
-            model_name=data.get("model_name", ""),
-            top_features=top_features,
-            feature_values=feature_values,
+            prediction=float(data[FIELD_PREDICTION]),
+            currency=str(data.get(FIELD_CURRENCY, PREDICTION_CURRENCY)),
+            model_name=str(data.get(FIELD_MODEL_NAME, "")),
+            top_features=[
+                GlobalFeatureImportanceItem.from_dict(item)
+                for item in data.get(FIELD_TOP_FEATURES, [])
+            ],
+            feature_values={
+                k: InputFeatureValueItem.from_dict(v)
+                for k, v in data.get(FIELD_FEATURE_VALUES, {}).items()
+            },
         )
+
+
+def build_global_feature_importance_item(
+    feature: str,
+    label: str,
+    global_importance: float,
+) -> GlobalFeatureImportanceItem:
+    return GlobalFeatureImportanceItem(
+        feature=feature,
+        label=label,
+        global_importance=global_importance,
+        global_importance_percent=round(global_importance * 100, 2),
+    )
+
+
+def build_input_feature_value_item(
+    value: Any,
+    label: str,
+    display: str,
+) -> InputFeatureValueItem:
+    return InputFeatureValueItem(
+        value=value,
+        label=label,
+        display=display,
+    )
+
+
+def build_explain_result(
+    prediction: float,
+    model_name: str,
+    feature_order: List[str],
+    importances: Dict[str, float],
+    values: Dict[str, Any],
+    label_fn,
+    display_fn,
+    top_k: int = 5,
+    currency: str = PREDICTION_CURRENCY,
+) -> ExplainResult:
+    all_items = []
+    for feature in feature_order:
+        item = build_global_feature_importance_item(
+            feature=feature,
+            label=label_fn(feature),
+            global_importance=importances[feature],
+        )
+        all_items.append(item)
+
+    all_items.sort(key=lambda x: x.global_importance, reverse=True)
+    top_items = all_items[:top_k] if top_k and top_k > 0 else all_items
+
+    feature_values = {}
+    for feature in feature_order:
+        raw_value = values.get(feature)
+        feature_values[feature] = build_input_feature_value_item(
+            value=raw_value,
+            label=label_fn(feature),
+            display=display_fn(feature, raw_value),
+        )
+
+    return ExplainResult(
+        prediction=prediction,
+        currency=currency,
+        model_name=model_name,
+        top_features=top_items,
+        feature_values=feature_values,
+    )
+
+
+def build_prediction_result(
+    prediction: float,
+    model_name: str,
+    currency: str = PREDICTION_CURRENCY,
+) -> PredictionResult:
+    return PredictionResult(
+        prediction=prediction,
+        currency=currency,
+        model_name=model_name,
+    )
