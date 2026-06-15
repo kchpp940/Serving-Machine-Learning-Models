@@ -1,42 +1,86 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+_bento_dir = os.path.abspath(os.path.dirname(__file__))
+_project_root = os.path.abspath(os.path.join(_bento_dir, ".."))
+
+_syspath_paths_to_remove = [
+    "",
+    ".",
+    _bento_dir,
+    _project_root,
+]
+for p in _syspath_paths_to_remove:
+    while p in sys.path:
+        sys.path.remove(p)
+
+import importlib.util
+_bentoml_spec = importlib.util.find_spec("bentoml")
+if _bentoml_spec is not None and _bento_dir in os.path.abspath(_bentoml_spec.origin):
+    raise ImportError(
+        "Local bentoml/ directory conflicts with bentoml package. "
+        "Please rename the local directory or run BentoML from another location."
+    )
 
 import bentoml
-import bentoml.sklearn
-from bentoml.io import NumpyNdarray, PandasDataFrame
+import bentoml.picklable_model
+from bentoml.io import NumpyNdarray, PandasDataFrame, JSON
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, _project_root)
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 
 
-predictor = bentoml.sklearn.load_runner("gbr:latest")
+BENTO_MODEL_NAME = "car_price_model"
 
-service = bentoml.Service("gbr", runners=[predictor])
+predictor = bentoml.picklable_model.get(BENTO_MODEL_NAME + ":latest").to_runner()
+
+svc = bentoml.Service(BENTO_MODEL_NAME, runners=[predictor])
 
 
-def _get_schema():
-    raw_bundle = bentoml.sklearn.load_model("gbr:latest")
-    model = CarPriceModel.from_sklearn_object(raw_bundle)
-    return model
+def _desanitize_value(val):
+    if val == "null":
+        return None
+    if isinstance(val, dict):
+        return {k: _desanitize_value(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_desanitize_value(v) for v in val]
+    return val
+
+
+def _get_model_bundle():
+    bento_model = bentoml.picklable_model.get(BENTO_MODEL_NAME + ":latest")
+    raw_bundle = bentoml.picklable_model.load_model(BENTO_MODEL_NAME + ":latest")
+    return raw_bundle, bento_model
 
 
 _model = None
+_model_metadata = None
 
 
 def get_model():
     global _model
     if _model is None:
-        _model = _get_schema()
+        raw_bundle, _ = _get_model_bundle()
+        _model = CarPriceModel.from_sklearn_object(raw_bundle)
         _model.schema.validate()
     return _model
 
 
-@service.api(input=PandasDataFrame(), output=NumpyNdarray())
+def get_model_metadata():
+    global _model_metadata
+    if _model_metadata is None:
+        _, bento_model = _get_model_bundle()
+        raw_meta = bento_model.info.metadata or {}
+        _model_metadata = _desanitize_value(raw_meta)
+    return _model_metadata
+
+
+@svc.api(input=PandasDataFrame(), output=NumpyNdarray())
 def predict(df: pd.DataFrame) -> np.ndarray:
     model = get_model()
 
@@ -50,3 +94,74 @@ def predict(df: pd.DataFrame) -> np.ndarray:
 
     result = model.predict_dataframe(df)
     return np.array(result)
+
+
+@svc.api(input=JSON(), output=JSON())
+def metadata(_) -> dict:
+    model = get_model()
+    meta = get_model_metadata()
+
+    candidate_info = meta.get("candidate_info", {})
+
+    response = {
+        "model_name": BENTO_MODEL_NAME,
+        "schema": {
+            "feature_order": model.feature_order,
+            "numeric_features": model.numeric_features,
+            "categorical_features": model.categorical_features,
+            "target_column": model.target_column,
+            "n_features": model.schema.n_features(),
+        },
+        "categorical_options": {
+            col: model.categorical_options(col)
+            for col in model.categorical_features
+        },
+    }
+
+    if candidate_info:
+        candidates = candidate_info.get("candidates", [])
+        best_model = candidate_info.get("best_model")
+        primary_metric = candidate_info.get("primary_metric", "r2_score")
+        higher_is_better = candidate_info.get("higher_is_better", True)
+
+        def _metric_value(c):
+            v = c.get("metrics", {}).get(primary_metric, 0)
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return 0
+
+        candidates_sorted = sorted(
+            candidates,
+            key=_metric_value,
+            reverse=higher_is_better,
+        )
+
+        candidate_summary = []
+        for rank, c in enumerate(candidates_sorted, 1):
+            is_best = c.get("model_name") == best_model
+            candidate_summary.append({
+                "rank": rank,
+                "model_name": c.get("model_name"),
+                "is_best": is_best,
+                "run_id": c.get("run_id"),
+                "metrics": c.get("metrics", {}),
+                "params": c.get("params", {}),
+            })
+
+        response["deployment"] = {
+            "best_model": best_model,
+            "best_run_id": candidate_info.get("best_run_id"),
+            "primary_metric": primary_metric,
+            "higher_is_better": higher_is_better,
+            "best_metric_value": candidate_info.get("best_metric_value"),
+            "schema_version": candidate_info.get("schema_version"),
+            "data_version": candidate_info.get("data_version"),
+            "candidate_summary": candidate_summary,
+        }
+    else:
+        response["deployment"] = {
+            "note": "此模型未通过候选选择流程发布，缺少候选对比信息",
+        }
+
+    return response

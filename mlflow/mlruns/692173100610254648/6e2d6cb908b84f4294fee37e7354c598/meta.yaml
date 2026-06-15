@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/6e2d6cb908b84f4294fee37e7354c598/artifacts
+end_time: 1781490381389
+entry_point_name: ''
+experiment_id: '692173100610254648'
+lifecycle_stage: active
+run_id: 6e2d6cb908b84f4294fee37e7354c598
+run_name: candidate_comparison
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1781490349019
+status: 3
+tags: []
+user_id: pkcha

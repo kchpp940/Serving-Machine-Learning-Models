@@ -56,19 +56,6 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
     "rwd": "Rear Wheel Drive (RWD)",
 }
 
-FEATURE_DISPLAY_NAMES: Dict[str, str] = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway MPG",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheelbase",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City MPG",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Cylinder Number",
-}
-
 
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"
@@ -81,19 +68,6 @@ class FeatureSchema:
     categorical_features: List[str] = field(default_factory=lambda: list(CATEGORICAL_FEATURES))
     target_column: str = TARGET_COLUMN
     categorical_encoders: Dict[str, "LabelEncoder"] = field(default_factory=dict)
-    feature_labels: Dict[str, str] = field(default_factory=lambda: dict(FEATURE_DISPLAY_NAMES))
-
-    def label(self, field_name: str) -> str:
-        return self.feature_labels.get(field_name, field_name)
-
-    def display_value(self, field_name: str, value) -> str:
-        if field_name in self.categorical_features:
-            return _display_name(field_name, str(value))
-        if isinstance(value, float):
-            if value.is_integer():
-                return str(int(value))
-            return f"{value:.2f}"
-        return str(value)
 
     def validate(self) -> None:
         for f in self.numeric_features:
@@ -224,7 +198,6 @@ class FeatureSchema:
             "categorical_features": list(self.categorical_features),
             "target_column": self.target_column,
             "categorical_encoders": encoder_data,
-            "feature_labels": dict(self.feature_labels),
         }
 
     @classmethod
@@ -236,7 +209,6 @@ class FeatureSchema:
             numeric_features=list(data.get("numeric_features", NUMERIC_FEATURES)),
             categorical_features=list(data.get("categorical_features", CATEGORICAL_FEATURES)),
             target_column=data.get("target_column", TARGET_COLUMN),
-            feature_labels=dict(data.get("feature_labels", FEATURE_DISPLAY_NAMES)),
         )
         encoders = {}
         for col, enc_data in data.get("categorical_encoders", {}).items():

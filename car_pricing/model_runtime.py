@@ -13,13 +13,6 @@ from car_pricing.feature_schema import (
     bundle_model,
     is_model_bundle,
 )
-from car_pricing.prediction_protocol import (
-    PredictionResult,
-    ExplainResult,
-    build_prediction_result,
-    build_explain_result,
-    PREDICTION_CURRENCY,
-)
 
 try:
     import joblib
@@ -174,61 +167,11 @@ class CarPriceModel:
         data = self.schema.vector_from_dataframe(df)
         return self.model.predict(data)
 
-    def predict_result(self, values: dict) -> PredictionResult:
-        prediction = float(self.predict_raw(values)[0])
-        return build_prediction_result(
-            prediction=prediction,
-            model_name=self.model_name,
-            currency=PREDICTION_CURRENCY,
-        )
-
     # ---------- FastAPI 兼容层 ----------
 
-    def predict_from_pydantic(self, data) -> PredictionResult:
-        values = {f: getattr(data, f) for f in self.feature_order}
-        return self.predict_result(values)
-
-    # ---------- 模型解释 ----------
-
-    @property
-    def supports_feature_importance(self) -> bool:
-        return hasattr(self.model, "feature_importances_")
-
-    @property
-    def model_name(self) -> str:
-        return type(self.model).__name__
-
-    def feature_importances(self) -> dict:
-        if not self.supports_feature_importance:
-            raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
-        importances = self.model.feature_importances_
-        result = {}
-        for i, feature in enumerate(self.feature_order):
-            result[feature] = float(importances[i])
-        return result
-
-    def explain_prediction(self, values: dict, top_k: int = 5) -> ExplainResult:
-        if not self.supports_feature_importance:
-            raise RuntimeError(f"模型 {self.model_name} 不支持特征重要性")
-
-        prediction = float(self.predict_raw(values)[0])
-        importances = self.feature_importances()
-
-        return build_explain_result(
-            prediction=prediction,
-            model_name=self.model_name,
-            feature_order=self.feature_order,
-            importances=importances,
-            values=values,
-            label_fn=self.schema.label,
-            display_fn=self.schema.display_value,
-            top_k=top_k,
-            currency=PREDICTION_CURRENCY,
-        )
-
-    def explain_from_pydantic(self, data, top_k: int = 5) -> ExplainResult:
-        values = {f: getattr(data, f) for f in self.feature_order}
-        return self.explain_prediction(values, top_k=top_k)
+    def predict_from_pydantic(self, data) -> np.ndarray:
+        encoded = {f: self.encode_feature(f, getattr(data, f)) for f in self.feature_order}
+        return self.predict_encoded(encoded)
 
     # ---------- 导出 bundle ----------
 

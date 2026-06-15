@@ -1,0 +1,8 @@
+artifact_location: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648
+creation_time: 1781490346373
+experiment_id: '692173100610254648'
+last_update_time: 1781490346373
+lifecycle_stage: active
+name: car_price_candidates
+trace_location: null
+workspace: default
