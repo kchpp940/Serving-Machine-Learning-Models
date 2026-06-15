@@ -95,6 +95,7 @@ def metadata(_) -> dict:
     meta = get_model_metadata()
 
     candidate_info = meta.get("candidate_info", {})
+    consistency_check = meta.get("consistency_check", {})
 
     response = {
         "model_name": BENTO_MODEL_NAME,
@@ -153,6 +154,20 @@ def metadata(_) -> dict:
             "data_version": candidate_info.get("data_version"),
             "candidate_summary": candidate_summary,
         }
+
+        if consistency_check and consistency_check.get("performed"):
+            response["deployment"]["consistency_check"] = {
+                "performed": True,
+                "all_checks_passed": consistency_check.get("all_checks_passed"),
+                "model_artifact_hash": consistency_check.get("model_artifact_hash"),
+                "verified_at": consistency_check.get("verified_at"),
+                "checks": consistency_check.get("checks", {}),
+            }
+        else:
+            response["deployment"]["consistency_check"] = {
+                "performed": False,
+                "reason": consistency_check.get("reason", "Consistency check not performed"),
+            }
     else:
         response["deployment"] = {
             "note": "此模型未通过候选选择流程发布，缺少候选对比信息",

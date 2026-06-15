@@ -1,0 +1,10 @@
+artifact_location: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/models/m-ccb7f8546ece497d813f489f00a19362/artifacts
+creation_timestamp: 1781496083180
+experiment_id: '692173100610254648'
+last_updated_timestamp: 1781496088029
+model_id: m-ccb7f8546ece497d813f489f00a19362
+model_type: null
+name: model
+source_run_id: 33202f2304e543a88ca8f57191c8330c
+status: 2
+status_message: null

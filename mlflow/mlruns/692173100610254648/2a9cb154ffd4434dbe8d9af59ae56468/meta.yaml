@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/2a9cb154ffd4434dbe8d9af59ae56468/artifacts
+end_time: 1781496092108
+entry_point_name: ''
+experiment_id: '692173100610254648'
+lifecycle_stage: active
+run_id: 2a9cb154ffd4434dbe8d9af59ae56468
+run_name: LinearRegression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1781496090095
+status: 3
+tags: []
+user_id: pkcha
