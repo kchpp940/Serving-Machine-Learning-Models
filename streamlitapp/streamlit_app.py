@@ -12,17 +12,9 @@ from car_pricing.api_client import (
     FIELD_DISPLAY_NAMES,
 )
 
-SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
-
 
 def _get_client():
-    return create_client(
-        service_type=SERVICE_TYPE,
-        base_url=API_BASE_URL,
-        timeout=REQUEST_TIMEOUT,
-    )
+    return create_client()
 
 
 @st.cache_data(show_spinner=False)
@@ -78,7 +70,7 @@ def main():
         schema = DEFAULT_SCHEMA
         using_fallback = True
     else:
-        st.success(f"Loaded schema from {API_BASE_URL} ({len(schema['feature_order'])} features)")
+        st.success(f"Loaded schema from service ({len(schema['feature_order'])} features)")
 
     st.header("Input Car Details")
     names = st.text_input("Name of Car")

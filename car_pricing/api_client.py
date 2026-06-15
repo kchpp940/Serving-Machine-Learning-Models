@@ -247,13 +247,18 @@ class BentoMLClient(BasePredictionClient):
 
 
 def create_client(
-    service_type: Union[str, ServiceType] = ServiceType.FASTAPI,
+    service_type: Optional[Union[str, ServiceType]] = None,
     base_url: Optional[str] = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: Optional[int] = None,
     **kwargs,
 ) -> BasePredictionClient:
+    if service_type is None:
+        service_type = os.environ.get("API_SERVICE_TYPE", "fastapi")
     if isinstance(service_type, str):
         service_type = ServiceType(service_type.lower())
+
+    if base_url is None:
+        base_url = os.environ.get("API_BASE_URL")
 
     if base_url is None:
         if service_type == ServiceType.FASTAPI:
@@ -262,6 +267,13 @@ def create_client(
             base_url = DEFAULT_BENTOML_BASE_URL
         else:
             raise ValueError(f"Unknown service type: {service_type}")
+
+    if timeout is None:
+        timeout_str = os.environ.get("API_REQUEST_TIMEOUT")
+        if timeout_str is not None:
+            timeout = int(timeout_str)
+        else:
+            timeout = DEFAULT_TIMEOUT
 
     if service_type == ServiceType.FASTAPI:
         return FastAPIClient(base_url=base_url, timeout=timeout, **kwargs)

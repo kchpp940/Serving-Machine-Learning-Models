@@ -13,10 +13,6 @@ from car_pricing.api_client import (
     ServiceError,
 )
 
-SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
-
 
 Builder_string = """
 ScreenManager:
@@ -167,12 +163,7 @@ sm.add_widget(Main(name="main"))
 class MainApp(MDApp):
     def build(self):
         self.help_string = Builder.load_string(Builder_string)
-        self._client = create_client(
-            service_type=SERVICE_TYPE,
-            base_url=API_BASE_URL,
-            timeout=REQUEST_TIMEOUT,
-            verify_ssl=cfi.where(),
-        )
+        self._client = create_client(verify_ssl=cfi.where())
         return self.help_string
 
     def predict(self):
