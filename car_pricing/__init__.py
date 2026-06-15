@@ -14,6 +14,10 @@ from car_pricing.feature_schema import (
 from car_pricing.model_runtime import CarPriceModel
 
 from car_pricing.prediction_protocol import (
+    PredictionResult,
+    InputFeatureValueItem,
+    GlobalFeatureImportanceItem,
+    ExplainResult,
     BatchRowResult,
     BatchPredictionResponse,
     build_fallback_schema,
@@ -35,6 +39,10 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "PredictionResult",
+    "InputFeatureValueItem",
+    "GlobalFeatureImportanceItem",
+    "ExplainResult",
     "BatchRowResult",
     "BatchPredictionResponse",
     "build_fallback_schema",

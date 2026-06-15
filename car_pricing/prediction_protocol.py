@@ -6,6 +6,43 @@ from typing import Any, Dict, List, Optional
 from car_pricing.feature_schema import FeatureSchema
 
 
+# ===== 单条预测协议 =====
+
+@dataclass
+class PredictionResult:
+    prediction: Optional[float] = None
+    error: Optional[str] = None
+    status: str = "ok"
+
+
+# ===== 解释协议 =====
+
+@dataclass
+class InputFeatureValueItem:
+    field_name: str
+    display_name: str
+    raw_value: Any
+    encoded_value: Optional[float] = None
+
+
+@dataclass
+class GlobalFeatureImportanceItem:
+    field_name: str
+    display_name: str
+    importance: float
+    rank: int
+
+
+@dataclass
+class ExplainResult:
+    prediction: Optional[float] = None
+    input_features: List[InputFeatureValueItem] = field(default_factory=list)
+    global_importance: List[GlobalFeatureImportanceItem] = field(default_factory=list)
+    error: Optional[str] = None
+
+
+# ===== 批量预测协议 =====
+
 @dataclass
 class BatchRowResult:
     row_id: Optional[str] = None
@@ -21,6 +58,8 @@ class BatchPredictionResponse:
     error_count: int = 0
     total_count: int = 0
 
+
+# ===== Schema 工具函数 =====
 
 def build_fallback_schema() -> dict:
     try:

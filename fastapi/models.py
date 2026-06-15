@@ -8,6 +8,10 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
+from car_pricing.prediction_protocol import PredictionResult as _ProtocolPredictionResult
+from car_pricing.prediction_protocol import InputFeatureValueItem as _ProtocolInputFeatureValueItem
+from car_pricing.prediction_protocol import GlobalFeatureImportanceItem as _ProtocolGlobalFeatureImportanceItem
+from car_pricing.prediction_protocol import ExplainResult as _ProtocolExplainResult
 from car_pricing.prediction_protocol import BatchRowResult as _ProtocolBatchRowResult
 from car_pricing.prediction_protocol import BatchPredictionResponse as _ProtocolBatchPredictionResponse
 
@@ -41,18 +45,90 @@ class CarPrediction(BaseModel):
         }
 
 
-class PredictionResponse(BaseModel):
-    prediction: float
+# ===== 单条预测响应 Pydantic =====
+
+class PredictionResponsePydantic(BaseModel):
+    prediction: Optional[float] = None
+    error: Optional[str] = None
     status: str = "ok"
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
+                "error": None,
                 "status": "ok",
             }
         }
 
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolPredictionResult) -> "PredictionResponsePydantic":
+        return cls(
+            prediction=proto.prediction,
+            error=proto.error,
+            status=proto.status,
+        )
+
+
+# 向后兼容：保留 PredictionResponse 别名
+PredictionResponse = PredictionResponsePydantic
+
+
+# ===== 解释响应 Pydantic =====
+
+class InputFeatureValueItemPydantic(BaseModel):
+    field_name: str
+    display_name: str
+    raw_value: Any
+    encoded_value: Optional[float] = None
+
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolInputFeatureValueItem) -> "InputFeatureValueItemPydantic":
+        return cls(
+            field_name=proto.field_name,
+            display_name=proto.display_name,
+            raw_value=proto.raw_value,
+            encoded_value=proto.encoded_value,
+        )
+
+
+class GlobalFeatureImportanceItemPydantic(BaseModel):
+    field_name: str
+    display_name: str
+    importance: float
+    rank: int
+
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolGlobalFeatureImportanceItem) -> "GlobalFeatureImportanceItemPydantic":
+        return cls(
+            field_name=proto.field_name,
+            display_name=proto.display_name,
+            importance=proto.importance,
+            rank=proto.rank,
+        )
+
+
+class ExplainResponsePydantic(BaseModel):
+    prediction: Optional[float] = None
+    input_features: List[InputFeatureValueItemPydantic] = []
+    global_importance: List[GlobalFeatureImportanceItemPydantic] = []
+    error: Optional[str] = None
+
+    @classmethod
+    def from_protocol(cls, proto: _ProtocolExplainResult) -> "ExplainResponsePydantic":
+        return cls(
+            prediction=proto.prediction,
+            input_features=[
+                InputFeatureValueItemPydantic.from_protocol(x) for x in proto.input_features
+            ],
+            global_importance=[
+                GlobalFeatureImportanceItemPydantic.from_protocol(x) for x in proto.global_importance
+            ],
+            error=proto.error,
+        )
+
+
+# ===== 批量预测请求/响应 Pydantic =====
 
 class BatchPredictionRequest(BaseModel):
     rows: List[Dict[str, Any]]

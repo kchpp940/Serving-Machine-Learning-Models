@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests as re
 
 from car_pricing.prediction_protocol import (
+    PredictionResult,
+    InputFeatureValueItem,
+    GlobalFeatureImportanceItem,
+    ExplainResult,
     BatchRowResult,
     BatchPredictionResponse,
     build_fallback_schema,
@@ -34,6 +38,18 @@ class BatchTransportResponse:
     success_count: int = 0
     error_count: int = 0
     total_count: int = 0
+    transport_error: Optional[str] = None
+
+
+@dataclass
+class SingleTransportResponse:
+    result: Optional[PredictionResult] = None
+    transport_error: Optional[str] = None
+
+
+@dataclass
+class ExplainTransportResponse:
+    result: Optional[ExplainResult] = None
     transport_error: Optional[str] = None
 
 
@@ -111,30 +127,119 @@ def fetch_schema() -> SchemaResponse:
 
 
 def predict_single(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    resp = predict(values)
+    if resp.transport_error:
+        return None, resp.transport_error
+    if resp.result and resp.result.error:
+        return None, resp.result.error
+    if resp.result and resp.result.prediction is not None:
+        return resp.result.prediction, None
+    return None, "Unexpected response format from server"
+
+
+def predict(values: Dict[str, Any]) -> SingleTransportResponse:
     url = f"{API_BASE_URL.rstrip('/')}/predict"
     try:
         res = re.post(url, json=values, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         body = res.json()
-        prediction = body.get("prediction")
-        if prediction is None:
-            return None, f"Unexpected response format from server: {body}"
-        return float(prediction), None
+        if "prediction" not in body:
+            return SingleTransportResponse(
+                transport_error=f"Unexpected response format from server: {body}"
+            )
+        result = PredictionResult(
+            prediction=body.get("prediction"),
+            error=body.get("error"),
+            status=body.get("status", "ok"),
+        )
+        return SingleTransportResponse(result=result, transport_error=None)
     except re.exceptions.ConnectionError:
-        return None, "Unable to connect to the prediction service. Please check that the API server is running."
+        return SingleTransportResponse(
+            transport_error="Unable to connect to the prediction service. Please check that the API server is running.",
+        )
     except re.exceptions.Timeout:
-        return None, "The request to the prediction service timed out. Please try again later."
+        return SingleTransportResponse(
+            transport_error="The request to the prediction service timed out. Please try again later.",
+        )
     except re.exceptions.HTTPError as e:
         detail = ""
         try:
             detail = res.json().get("detail", "")
         except Exception:
             pass
-        return None, f"Server returned an error ({res.status_code}): {detail or str(e)}"
+        return SingleTransportResponse(
+            transport_error=f"Server returned an error ({res.status_code}): {detail or str(e)}",
+        )
     except ValueError:
-        return None, "The server returned an invalid response. Please try again later."
+        return SingleTransportResponse(
+            transport_error="The server returned an invalid response. Please try again later.",
+        )
     except Exception as e:
-        return None, f"An unexpected error occurred: {str(e)}"
+        return SingleTransportResponse(
+            transport_error=f"An unexpected error occurred: {str(e)}",
+        )
+
+
+def explain(values: Dict[str, Any]) -> ExplainTransportResponse:
+    url = f"{API_BASE_URL.rstrip('/')}/explain"
+    try:
+        res = re.post(url, json=values, timeout=REQUEST_TIMEOUT)
+        res.raise_for_status()
+        body = res.json()
+        if "prediction" not in body and "error" not in body:
+            return ExplainTransportResponse(
+                transport_error=f"Unexpected response format from server: {body}"
+            )
+        input_features = [
+            InputFeatureValueItem(
+                field_name=x.get("field_name", ""),
+                display_name=x.get("display_name", ""),
+                raw_value=x.get("raw_value"),
+                encoded_value=x.get("encoded_value"),
+            )
+            for x in body.get("input_features", [])
+        ]
+        global_importance = [
+            GlobalFeatureImportanceItem(
+                field_name=x.get("field_name", ""),
+                display_name=x.get("display_name", ""),
+                importance=float(x.get("importance", 0.0)),
+                rank=int(x.get("rank", 0)),
+            )
+            for x in body.get("global_importance", [])
+        ]
+        result = ExplainResult(
+            prediction=body.get("prediction"),
+            input_features=input_features,
+            global_importance=global_importance,
+            error=body.get("error"),
+        )
+        return ExplainTransportResponse(result=result, transport_error=None)
+    except re.exceptions.ConnectionError:
+        return ExplainTransportResponse(
+            transport_error="Unable to connect to the prediction service. Please check that the API server is running.",
+        )
+    except re.exceptions.Timeout:
+        return ExplainTransportResponse(
+            transport_error="The explain request timed out. Please try again later.",
+        )
+    except re.exceptions.HTTPError as e:
+        detail = ""
+        try:
+            detail = res.json().get("detail", "")
+        except Exception:
+            pass
+        return ExplainTransportResponse(
+            transport_error=f"Server returned an error ({res.status_code}): {detail or str(e)}",
+        )
+    except ValueError:
+        return ExplainTransportResponse(
+            transport_error="The server returned an invalid response. Please try again later.",
+        )
+    except Exception as e:
+        return ExplainTransportResponse(
+            transport_error=f"An unexpected error occurred: {str(e)}",
+        )
 
 
 def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = None) -> BatchTransportResponse:
@@ -192,3 +297,29 @@ def predict_batch(rows: List[Dict[str, Any]], row_ids: Optional[List[str]] = Non
             results=[],
             transport_error=f"An unexpected error occurred: {str(e)}",
         )
+
+
+__all__ = [
+    "API_BASE_URL",
+    "SchemaResponse",
+    "SingleTransportResponse",
+    "ExplainTransportResponse",
+    "BatchTransportResponse",
+    "PredictionResult",
+    "InputFeatureValueItem",
+    "GlobalFeatureImportanceItem",
+    "ExplainResult",
+    "BatchRowResult",
+    "BatchPredictionResponse",
+    "get_api_base_url",
+    "get_display_name",
+    "get_default_values",
+    "validate_values",
+    "format_value",
+    "fetch_schema",
+    "predict",
+    "predict_single",
+    "explain",
+    "predict_batch",
+    "build_fallback_schema",
+]

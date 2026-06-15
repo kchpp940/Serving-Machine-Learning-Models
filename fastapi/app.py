@@ -10,16 +10,24 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi import HTTPException
 from models import (
     CarPrediction,
-    PredictionResponse,
+    PredictionResponsePydantic,
     BatchPredictionRequest,
     BatchPredictionResponsePydantic,
+    ExplainResponsePydantic,
 )
 import numpy as np
 from typing import Dict, Any, List
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing.prediction_protocol import BatchRowResult, BatchPredictionResponse
+from car_pricing.prediction_protocol import (
+    PredictionResult,
+    ExplainResult,
+    InputFeatureValueItem,
+    GlobalFeatureImportanceItem,
+    BatchRowResult,
+    BatchPredictionResponse,
+)
 
 
 app = FastAPI(
@@ -80,17 +88,108 @@ async def get_schema():
     return model.schema.to_api_dict()
 
 
-@app.post("/predict", response_model=PredictionResponse)
+def _build_prediction_result(model: CarPriceModel, values: Dict[str, Any]) -> PredictionResult:
+    try:
+        prediction = model.predict_raw(values)
+        return PredictionResult(
+            prediction=float(prediction[0]),
+            error=None,
+            status="ok",
+        )
+    except ValueError as e:
+        return PredictionResult(
+            prediction=None,
+            error=str(e),
+            status="error",
+        )
+    except Exception as e:
+        return PredictionResult(
+            prediction=None,
+            error=f"Prediction failed: {str(e)}",
+            status="error",
+        )
+
+
+@app.post("/predict", response_model=PredictionResponsePydantic)
 def predict(data: CarPrediction):
     try:
         model = get_model()
-        predictions = model.predict_from_pydantic(data)
-        value = float(predictions[0])
-        return PredictionResponse(prediction=value)
+        values = data.dict()
+        proto = _build_prediction_result(model, values)
+        if proto.error:
+            raise HTTPException(status_code=400, detail=proto.error)
+        return PredictionResponsePydantic.from_protocol(proto)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+
+
+def _build_input_features(model: CarPriceModel, values: Dict[str, Any]) -> List[InputFeatureValueItem]:
+    schema = model.schema
+    items: List[InputFeatureValueItem] = []
+    for f in schema.feature_order:
+        raw = values.get(f)
+        encoded: float | None = None
+        try:
+            encoded = schema.encode_feature(f, raw)
+        except Exception:
+            encoded = None
+        items.append(InputFeatureValueItem(
+            field_name=f,
+            display_name=schema.get_display_name(f),
+            raw_value=raw,
+            encoded_value=encoded,
+        ))
+    return items
+
+
+def _build_global_importance(model: CarPriceModel) -> List[GlobalFeatureImportanceItem]:
+    schema = model.schema
+    items: List[GlobalFeatureImportanceItem] = []
+    estimator = getattr(model.model, "feature_importances_", None)
+    if estimator is None:
+        return items
+    importances = list(estimator)
+    pairs = [(schema.feature_order[i], float(importances[i])) for i in range(min(len(schema.feature_order), len(importances)))]
+    pairs.sort(key=lambda x: x[1], reverse=True)
+    for rank, (fname, imp) in enumerate(pairs, start=1):
+        items.append(GlobalFeatureImportanceItem(
+            field_name=fname,
+            display_name=schema.get_display_name(fname),
+            importance=imp,
+            rank=rank,
+        ))
+    return items
+
+
+@app.post("/explain", response_model=ExplainResponsePydantic)
+def explain(data: CarPrediction):
+    try:
+        model = get_model()
+        values = data.dict()
+        pred_proto = _build_prediction_result(model, values)
+        if pred_proto.error:
+            raise HTTPException(status_code=400, detail=pred_proto.error)
+
+        input_features = _build_input_features(model, values)
+        global_importance = _build_global_importance(model)
+
+        proto = ExplainResult(
+            prediction=pred_proto.prediction,
+            input_features=input_features,
+            global_importance=global_importance,
+            error=None,
+        )
+        return ExplainResponsePydantic.from_protocol(proto)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"解释失败: {str(e)}")
 
 
 def _validate_and_predict_row(values: Dict[str, Any], model: CarPriceModel) -> BatchRowResult:
@@ -124,25 +223,12 @@ def _validate_and_predict_row(values: Dict[str, Any], model: CarPriceModel) -> B
             field_errors=field_errors,
         )
 
-    try:
-        prediction = model.predict_raw(values)
-        return BatchRowResult(
-            prediction=float(prediction[0]),
-            error=None,
-            field_errors=None,
-        )
-    except ValueError as e:
-        return BatchRowResult(
-            prediction=None,
-            error=str(e),
-            field_errors=None,
-        )
-    except Exception as e:
-        return BatchRowResult(
-            prediction=None,
-            error=f"Prediction failed: {str(e)}",
-            field_errors=None,
-        )
+    proto = _build_prediction_result(model, values)
+    return BatchRowResult(
+        prediction=proto.prediction,
+        error=proto.error,
+        field_errors=None,
+    )
 
 
 @app.post("/predict_batch", response_model=BatchPredictionResponsePydantic)
