@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
@@ -177,3 +178,91 @@ class CarPriceModel:
 
     def to_bundle(self) -> dict:
         return bundle_model(self.model, self.schema)
+
+    # ---------- metadata ----------
+
+    def get_metadata(self) -> Dict[str, Any]:
+        return {
+            "feature_order": self.feature_order,
+            "numeric_features": self.numeric_features,
+            "categorical_features": self.categorical_features,
+            "target_column": self.target_column,
+            "categorical_options": {
+                f: self.categorical_options(f) for f in self.categorical_features
+            },
+            "model_mode": self.mode,
+            "n_features": self.schema.n_features(),
+        }
+
+    # ---------- self_check ----------
+
+    def self_check(self) -> Dict[str, Any]:
+        import time
+
+        result: Dict[str, Any] = {
+            "passed": True,
+            "checks": [],
+            "errors": [],
+            "timestamp": time.time(),
+        }
+
+        check_schema = {"name": "schema_valid", "passed": False, "detail": ""}
+        try:
+            self.schema.validate()
+            check_schema["passed"] = True
+            check_schema["detail"] = "FeatureSchema validation passed"
+        except Exception as e:
+            check_schema["passed"] = False
+            check_schema["detail"] = str(e)
+            result["passed"] = False
+            result["errors"].append(f"Schema validation failed: {e}")
+        result["checks"].append(check_schema)
+
+        check_dimensions = {"name": "model_dimensions_match", "passed": False, "detail": ""}
+        try:
+            expected = self.schema.n_features()
+            actual = getattr(self.model, "n_features_in_", expected)
+            if actual == expected:
+                check_dimensions["passed"] = True
+                check_dimensions["detail"] = f"n_features_in_={actual} matches schema features={expected}"
+            else:
+                check_dimensions["passed"] = False
+                check_dimensions["detail"] = f"n_features_in_={actual} != schema features={expected}"
+                result["passed"] = False
+                result["errors"].append(
+                    f"Model dimension mismatch: n_features_in_={actual}, schema features={expected}"
+                )
+        except Exception as e:
+            check_dimensions["passed"] = False
+            check_dimensions["detail"] = str(e)
+            result["passed"] = False
+            result["errors"].append(f"Dimension check error: {e}")
+        result["checks"].append(check_dimensions)
+
+        check_predict = {"name": "prediction_smoke_test", "passed": False, "detail": ""}
+        try:
+            sample = {}
+            for f in self.schema.feature_order:
+                if f in self.schema.numeric_features:
+                    sample[f] = 0.0
+                elif f in self.schema.categorical_features:
+                    classes = self.schema.categorical_classes(f)
+                    sample[f] = classes[0] if classes else ""
+            pred = self.predict_raw(sample)
+            if len(pred) == 1 and isinstance(float(pred[0]), float):
+                check_predict["passed"] = True
+                check_predict["detail"] = f"Smoke prediction succeeded, output={float(pred[0]):.4f}"
+            else:
+                check_predict["passed"] = False
+                check_predict["detail"] = f"Unexpected prediction shape: {pred}"
+                result["passed"] = False
+                result["errors"].append(f"Smoke test returned unexpected output: {pred}")
+        except Exception as e:
+            check_predict["passed"] = False
+            check_predict["detail"] = str(e)
+            result["passed"] = False
+            result["errors"].append(f"Prediction smoke test failed: {e}")
+        result["checks"].append(check_predict)
+
+        result["timestamp"] = time.time()
+        return result

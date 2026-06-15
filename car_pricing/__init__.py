@@ -12,15 +12,22 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
-from car_pricing.service_status import (
-    API_VERSION,
-    API_BASE_SUGGESTIONS,
-    SelfCheckResult,
-    ServiceStatus,
+from car_pricing.versioning import (
     compute_schema_version,
     compute_data_version,
+    compute_artifact_hash,
+)
+
+from car_pricing.api_client import (
+    API_VERSION,
+    API_BASE_SUGGESTIONS,
     detect_api_base,
-    run_self_check,
+    PredictionAPIClient,
+    BentoMLAPIClient,
+)
+
+from car_pricing.service_status import (
+    ServiceStatus,
     build_service_status,
 )
 
@@ -35,13 +42,14 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "API_VERSION",
-    "API_BASE_SUGGESTIONS",
-    "SelfCheckResult",
-    "ServiceStatus",
     "compute_schema_version",
     "compute_data_version",
+    "compute_artifact_hash",
+    "API_VERSION",
+    "API_BASE_SUGGESTIONS",
     "detect_api_base",
-    "run_self_check",
+    "PredictionAPIClient",
+    "BentoMLAPIClient",
+    "ServiceStatus",
     "build_service_status",
 ]

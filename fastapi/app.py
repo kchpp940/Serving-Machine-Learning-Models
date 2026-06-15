@@ -81,17 +81,7 @@ async def health():
 @app.get("/metadata")
 async def get_metadata():
     model = get_model()
-    return {
-        "feature_order": model.feature_order,
-        "numeric_features": model.numeric_features,
-        "categorical_features": model.categorical_features,
-        "target_column": model.target_column,
-        "categorical_options": {
-            f: model.categorical_options(f) for f in model.categorical_features
-        },
-        "model_mode": model.mode,
-        "n_features": model.schema.n_features(),
-    }
+    return model.get_metadata()
 
 
 @app.get("/schema")

@@ -1,10 +1,15 @@
 import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import streamlit as st
 import requests as re
 from datetime import datetime
 
+from car_pricing.api_client import PredictionAPIClient, BentoMLAPIClient
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-BENTOML_BASE_URL = os.environ.get("BENTOML_BASE_URL", "http://localhost:3000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 DEFAULT_SCHEMA = {
@@ -78,47 +83,6 @@ def fetch_schema():
         return None, "Schema response was not valid JSON."
     except Exception as e:
         return None, f"Unexpected error fetching schema: {str(e)}"
-
-
-def _get_json(url, label):
-    try:
-        resp = re.get(url, timeout=REQUEST_TIMEOUT)
-        if resp.status_code == 200:
-            return resp.json(), None
-        detail = ""
-        try:
-            detail = resp.json().get("detail", "")
-        except Exception:
-            pass
-        return None, f"{label} returned HTTP {resp.status_code}: {detail or resp.text}"
-    except re.exceptions.ConnectionError:
-        return None, f"Cannot connect to {label} at {url}"
-    except re.exceptions.Timeout:
-        return None, f"{label} request timed out"
-    except ValueError:
-        return None, f"{label} returned invalid JSON"
-    except Exception as e:
-        return None, f"{label} error: {str(e)}"
-
-
-@st.cache_data(show_spinner=False)
-def fetch_fastapi_status():
-    return _get_json(f"{API_BASE_URL.rstrip('/')}/status", "FastAPI /status")
-
-
-@st.cache_data(show_spinner=False)
-def fetch_fastapi_health():
-    return _get_json(f"{API_BASE_URL.rstrip('/')}/health", "FastAPI /health")
-
-
-@st.cache_data(show_spinner=False)
-def fetch_bentoml_status():
-    return _get_json(f"{BENTOML_BASE_URL.rstrip('/')}/status", "BentoML /status")
-
-
-@st.cache_data(show_spinner=False)
-def fetch_bentoml_health():
-    return _get_json(f"{BENTOML_BASE_URL.rstrip('/')}/health", "BentoML /health")
 
 
 def build_form(schema):
@@ -203,6 +167,19 @@ def render_predict_page():
             st.error("The server returned an invalid response. Please try again later.")
         except Exception as e:
             st.error(f"An unexpected error occurred: {str(e)}")
+
+
+@st.cache_data(show_spinner=False)
+def _fetch_statuses():
+    fastapi_client = PredictionAPIClient(API_BASE_URL, REQUEST_TIMEOUT)
+    bentoml_client = BentoMLAPIClient(timeout=REQUEST_TIMEOUT)
+
+    fa_health, fa_health_err = fastapi_client.health()
+    fa_status, fa_status_err = fastapi_client.status()
+    bm_health, bm_health_err = bentoml_client.health()
+    bm_status, bm_status_err = bentoml_client.status()
+
+    return fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err
 
 
 def _render_health_badge(name, health_data, health_error):
@@ -369,31 +346,27 @@ def _render_error_details(fastapi_health_err, bentoml_health_err, fastapi_status
 
 def render_system_status_page():
     st.title("System Status Dashboard")
-    st.write(f"FastAPI endpoint: `{API_BASE_URL}`  |  BentoML endpoint: `{BENTOML_BASE_URL}`")
+    bentoml_base = os.environ.get("BENTOML_BASE_URL", "http://localhost:3000")
+    st.write(f"FastAPI endpoint: `{API_BASE_URL}`  |  BentoML endpoint: `{bentoml_base}`")
 
     if st.button("🔄 Refresh Status"):
-        fetch_fastapi_status.clear()
-        fetch_fastapi_health.clear()
-        fetch_bentoml_status.clear()
-        fetch_bentoml_health.clear()
+        _fetch_statuses.clear()
         st.experimental_rerun()
+
+    fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err = _fetch_statuses()
 
     st.header("Service Health")
     col1, col2 = st.columns(2)
     with col1:
-        fa_health, fa_health_err = fetch_fastapi_health()
-        fa_ok = _render_health_badge("FastAPI", fa_health, fa_health_err)
+        _render_health_badge("FastAPI", fa_health, fa_health_err)
     with col2:
-        bm_health, bm_health_err = fetch_bentoml_health()
-        bm_ok = _render_health_badge("BentoML", bm_health, bm_health_err)
+        _render_health_badge("BentoML", bm_health, bm_health_err)
 
     st.header("Aggregated Status")
     col1, col2 = st.columns(2)
     with col1:
-        fa_status, fa_status_err = fetch_fastapi_status()
         _render_status_card("FastAPI", fa_status, fa_status_err)
     with col2:
-        bm_status, bm_status_err = fetch_bentoml_status()
         _render_status_card("BentoML", bm_status, bm_status_err)
 
     st.header("Model Lineage & Schema")
