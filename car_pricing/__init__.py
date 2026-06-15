@@ -15,8 +15,8 @@ from car_pricing.model_runtime import CarPriceModel
 
 from car_pricing.prediction_protocol import (
     PredictionResult,
-    InputFeatureValueItem,
-    GlobalFeatureImportanceItem,
+    FeatureValueItem,
+    TopFeatureItem,
     ExplainResult,
     BatchRowResult,
     BatchPredictionResponse,
@@ -40,8 +40,8 @@ __all__ = [
     "is_model_bundle",
     "CarPriceModel",
     "PredictionResult",
-    "InputFeatureValueItem",
-    "GlobalFeatureImportanceItem",
+    "FeatureValueItem",
+    "TopFeatureItem",
     "ExplainResult",
     "BatchRowResult",
     "BatchPredictionResponse",

@@ -9,8 +9,8 @@ from pydantic import BaseModel
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
 from car_pricing.prediction_protocol import PredictionResult as _ProtocolPredictionResult
-from car_pricing.prediction_protocol import InputFeatureValueItem as _ProtocolInputFeatureValueItem
-from car_pricing.prediction_protocol import GlobalFeatureImportanceItem as _ProtocolGlobalFeatureImportanceItem
+from car_pricing.prediction_protocol import FeatureValueItem as _ProtocolFeatureValueItem
+from car_pricing.prediction_protocol import TopFeatureItem as _ProtocolTopFeatureItem
 from car_pricing.prediction_protocol import ExplainResult as _ProtocolExplainResult
 from car_pricing.prediction_protocol import BatchRowResult as _ProtocolBatchRowResult
 from car_pricing.prediction_protocol import BatchPredictionResponse as _ProtocolBatchPredictionResponse
@@ -48,16 +48,16 @@ class CarPrediction(BaseModel):
 # ===== 单条预测响应 Pydantic =====
 
 class PredictionResponsePydantic(BaseModel):
-    prediction: Optional[float] = None
-    error: Optional[str] = None
-    status: str = "ok"
+    prediction: float
+    currency: str = "USD"
+    model_name: str = "sklearn_gbr"
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "error": None,
-                "status": "ok",
+                "currency": "USD",
+                "model_name": "sklearn_gbr",
             }
         }
 
@@ -65,25 +65,24 @@ class PredictionResponsePydantic(BaseModel):
     def from_protocol(cls, proto: _ProtocolPredictionResult) -> "PredictionResponsePydantic":
         return cls(
             prediction=proto.prediction,
-            error=proto.error,
-            status=proto.status,
+            currency=proto.currency,
+            model_name=proto.model_name,
         )
 
 
-# 向后兼容：保留 PredictionResponse 别名
 PredictionResponse = PredictionResponsePydantic
 
 
 # ===== 解释响应 Pydantic =====
 
-class InputFeatureValueItemPydantic(BaseModel):
+class FeatureValueItemPydantic(BaseModel):
     field_name: str
     display_name: str
     raw_value: Any
     encoded_value: Optional[float] = None
 
     @classmethod
-    def from_protocol(cls, proto: _ProtocolInputFeatureValueItem) -> "InputFeatureValueItemPydantic":
+    def from_protocol(cls, proto: _ProtocolFeatureValueItem) -> "FeatureValueItemPydantic":
         return cls(
             field_name=proto.field_name,
             display_name=proto.display_name,
@@ -92,39 +91,41 @@ class InputFeatureValueItemPydantic(BaseModel):
         )
 
 
-class GlobalFeatureImportanceItemPydantic(BaseModel):
+class TopFeatureItemPydantic(BaseModel):
     field_name: str
     display_name: str
-    importance: float
-    rank: int
+    global_importance: float
+    global_importance_percent: float
 
     @classmethod
-    def from_protocol(cls, proto: _ProtocolGlobalFeatureImportanceItem) -> "GlobalFeatureImportanceItemPydantic":
+    def from_protocol(cls, proto: _ProtocolTopFeatureItem) -> "TopFeatureItemPydantic":
         return cls(
             field_name=proto.field_name,
             display_name=proto.display_name,
-            importance=proto.importance,
-            rank=proto.rank,
+            global_importance=proto.global_importance,
+            global_importance_percent=proto.global_importance_percent,
         )
 
 
 class ExplainResponsePydantic(BaseModel):
-    prediction: Optional[float] = None
-    input_features: List[InputFeatureValueItemPydantic] = []
-    global_importance: List[GlobalFeatureImportanceItemPydantic] = []
-    error: Optional[str] = None
+    prediction: float
+    currency: str = "USD"
+    model_name: str = "sklearn_gbr"
+    top_features: List[TopFeatureItemPydantic] = []
+    feature_values: List[FeatureValueItemPydantic] = []
 
     @classmethod
     def from_protocol(cls, proto: _ProtocolExplainResult) -> "ExplainResponsePydantic":
         return cls(
             prediction=proto.prediction,
-            input_features=[
-                InputFeatureValueItemPydantic.from_protocol(x) for x in proto.input_features
+            currency=proto.currency,
+            model_name=proto.model_name,
+            top_features=[
+                TopFeatureItemPydantic.from_protocol(x) for x in proto.top_features
             ],
-            global_importance=[
-                GlobalFeatureImportanceItemPydantic.from_protocol(x) for x in proto.global_importance
+            feature_values=[
+                FeatureValueItemPydantic.from_protocol(x) for x in proto.feature_values
             ],
-            error=proto.error,
         )
 
 

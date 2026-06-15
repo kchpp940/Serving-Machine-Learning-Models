@@ -25,8 +25,8 @@ from car_pricing.api_client import (
 
 from car_pricing.prediction_protocol import (
     PredictionResult,
-    InputFeatureValueItem,
-    GlobalFeatureImportanceItem,
+    FeatureValueItem,
+    TopFeatureItem,
     ExplainResult,
     BatchRowResult,
     BatchPredictionResponse,
@@ -40,8 +40,8 @@ __all__ = [
     "ExplainTransportResponse",
     "BatchTransportResponse",
     "PredictionResult",
-    "InputFeatureValueItem",
-    "GlobalFeatureImportanceItem",
+    "FeatureValueItem",
+    "TopFeatureItem",
     "ExplainResult",
     "BatchRowResult",
     "BatchPredictionResponse",

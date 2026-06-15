@@ -10,15 +10,15 @@ from car_pricing.feature_schema import FeatureSchema
 
 @dataclass
 class PredictionResult:
-    prediction: Optional[float] = None
-    error: Optional[str] = None
-    status: str = "ok"
+    prediction: float
+    currency: str = "USD"
+    model_name: str = "sklearn_gbr"
 
 
 # ===== 解释协议 =====
 
 @dataclass
-class InputFeatureValueItem:
+class FeatureValueItem:
     field_name: str
     display_name: str
     raw_value: Any
@@ -26,19 +26,20 @@ class InputFeatureValueItem:
 
 
 @dataclass
-class GlobalFeatureImportanceItem:
+class TopFeatureItem:
     field_name: str
     display_name: str
-    importance: float
-    rank: int
+    global_importance: float
+    global_importance_percent: float
 
 
 @dataclass
 class ExplainResult:
-    prediction: Optional[float] = None
-    input_features: List[InputFeatureValueItem] = field(default_factory=list)
-    global_importance: List[GlobalFeatureImportanceItem] = field(default_factory=list)
-    error: Optional[str] = None
+    prediction: float
+    currency: str = "USD"
+    model_name: str = "sklearn_gbr"
+    top_features: List[TopFeatureItem] = field(default_factory=list)
+    feature_values: List[FeatureValueItem] = field(default_factory=list)
 
 
 # ===== 批量预测协议 =====

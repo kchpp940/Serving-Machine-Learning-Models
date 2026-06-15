@@ -8,8 +8,8 @@ import requests as re
 
 from car_pricing.prediction_protocol import (
     PredictionResult,
-    InputFeatureValueItem,
-    GlobalFeatureImportanceItem,
+    FeatureValueItem,
+    TopFeatureItem,
     ExplainResult,
     BatchRowResult,
     BatchPredictionResponse,
@@ -130,8 +130,6 @@ def predict_single(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[st
     resp = predict(values)
     if resp.transport_error:
         return None, resp.transport_error
-    if resp.result and resp.result.error:
-        return None, resp.result.error
     if resp.result and resp.result.prediction is not None:
         return resp.result.prediction, None
     return None, "Unexpected response format from server"
@@ -148,9 +146,9 @@ def predict(values: Dict[str, Any]) -> SingleTransportResponse:
                 transport_error=f"Unexpected response format from server: {body}"
             )
         result = PredictionResult(
-            prediction=body.get("prediction"),
-            error=body.get("error"),
-            status=body.get("status", "ok"),
+            prediction=float(body["prediction"]),
+            currency=body.get("currency", "USD"),
+            model_name=body.get("model_name", "sklearn_gbr"),
         )
         return SingleTransportResponse(result=result, transport_error=None)
     except re.exceptions.ConnectionError:
@@ -186,33 +184,34 @@ def explain(values: Dict[str, Any]) -> ExplainTransportResponse:
         res = re.post(url, json=values, timeout=REQUEST_TIMEOUT)
         res.raise_for_status()
         body = res.json()
-        if "prediction" not in body and "error" not in body:
+        if "prediction" not in body:
             return ExplainTransportResponse(
                 transport_error=f"Unexpected response format from server: {body}"
             )
-        input_features = [
-            InputFeatureValueItem(
+        feature_values = [
+            FeatureValueItem(
                 field_name=x.get("field_name", ""),
                 display_name=x.get("display_name", ""),
                 raw_value=x.get("raw_value"),
                 encoded_value=x.get("encoded_value"),
             )
-            for x in body.get("input_features", [])
+            for x in body.get("feature_values", [])
         ]
-        global_importance = [
-            GlobalFeatureImportanceItem(
+        top_features = [
+            TopFeatureItem(
                 field_name=x.get("field_name", ""),
                 display_name=x.get("display_name", ""),
-                importance=float(x.get("importance", 0.0)),
-                rank=int(x.get("rank", 0)),
+                global_importance=float(x.get("global_importance", 0.0)),
+                global_importance_percent=float(x.get("global_importance_percent", 0.0)),
             )
-            for x in body.get("global_importance", [])
+            for x in body.get("top_features", [])
         ]
         result = ExplainResult(
-            prediction=body.get("prediction"),
-            input_features=input_features,
-            global_importance=global_importance,
-            error=body.get("error"),
+            prediction=float(body["prediction"]),
+            currency=body.get("currency", "USD"),
+            model_name=body.get("model_name", "sklearn_gbr"),
+            top_features=top_features,
+            feature_values=feature_values,
         )
         return ExplainTransportResponse(result=result, transport_error=None)
     except re.exceptions.ConnectionError:
@@ -306,8 +305,8 @@ __all__ = [
     "ExplainTransportResponse",
     "BatchTransportResponse",
     "PredictionResult",
-    "InputFeatureValueItem",
-    "GlobalFeatureImportanceItem",
+    "FeatureValueItem",
+    "TopFeatureItem",
     "ExplainResult",
     "BatchRowResult",
     "BatchPredictionResponse",
