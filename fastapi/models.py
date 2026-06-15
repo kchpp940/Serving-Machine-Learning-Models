@@ -1,6 +1,6 @@
 import sys
 import os
-from typing import List, Optional, Any
+from typing import Dict, List, Optional, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -38,29 +38,6 @@ class CarPrediction(BaseModel):
         }
 
 
-class FeatureContribution(BaseModel):
-    rank: int = Field(description="Importance rank (1 = most important)")
-    feature_name: str = Field(description="Internal feature code name")
-    display_name: str = Field(description="Human-readable feature name")
-    feature_value: Any = Field(description="Original input feature value")
-    value_display: str = Field(description="Human-readable feature value")
-    importance: float = Field(description="Feature importance score (raw)")
-    importance_percent: float = Field(description="Feature importance as percentage")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "rank": 1,
-                "feature_name": "enginesize",
-                "display_name": "Engine Size",
-                "feature_value": 130,
-                "value_display": "130",
-                "importance": 0.6417,
-                "importance_percent": 64.17,
-            }
-        }
-
-
 class PredictionResponse(BaseModel):
     prediction: float = Field(description="Predicted car price")
     status: str = Field(default="ok", description="Response status")
@@ -74,70 +51,66 @@ class PredictionResponse(BaseModel):
         }
 
 
-class PredictionWithExplanationResponse(PredictionResponse):
-    model_name: str = Field(description="Name of the ML model used")
-    top_features: List[FeatureContribution] = Field(description="Top N most important features for this prediction")
+class FeatureImportanceItem(BaseModel):
+    feature: str = Field(description="Internal feature code name")
+    label: str = Field(description="Human-readable feature name from schema")
+    global_importance: float = Field(description="Global feature importance score (raw)")
+    global_importance_percent: float = Field(description="Global feature importance as percentage")
 
     class Config:
         schema_extra = {
             "example": {
-                "prediction": 13295.27,
-                "status": "ok",
-                "model_name": "GradientBoostingRegressor",
-                "top_features": [
-                    {
-                        "rank": 1,
-                        "feature_name": "enginesize",
-                        "display_name": "Engine Size",
-                        "feature_value": 130,
-                        "value_display": "130",
-                        "importance": 0.6417,
-                        "importance_percent": 64.17,
-                    },
-                    {
-                        "rank": 2,
-                        "feature_name": "curbweight",
-                        "display_name": "Curb Weight",
-                        "feature_value": 2548,
-                        "value_display": "2548",
-                        "importance": 0.1659,
-                        "importance_percent": 16.59,
-                    },
-                ],
+                "feature": "enginesize",
+                "label": "Engine Size",
+                "global_importance": 0.6417,
+                "global_importance_percent": 64.17,
             }
         }
 
 
-class ExplainResponse(PredictionWithExplanationResponse):
-    all_features: List[FeatureContribution] = Field(description="All features sorted by importance")
+class FeatureValueItem(BaseModel):
+    value: Any = Field(description="Original input feature value")
+    label: str = Field(description="Human-readable feature name from schema")
+    display: str = Field(description="Human-readable feature value representation")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "value": "rwd",
+                "label": "Drive Wheel",
+                "display": "Rear Wheel Drive (RWD)",
+            }
+        }
+
+
+class ExplainResponse(BaseModel):
+    prediction: float = Field(description="Predicted car price")
+    model_name: str = Field(description="Name of the ML model used")
+    top_features: List[FeatureImportanceItem] = Field(description="Top N features by global importance")
+    feature_values: Dict[str, FeatureValueItem] = Field(description="Input feature values with schema labels and display strings")
 
     class Config:
         schema_extra = {
             "example": {
                 "prediction": 13295.27,
-                "status": "ok",
                 "model_name": "GradientBoostingRegressor",
                 "top_features": [
                     {
-                        "rank": 1,
-                        "feature_name": "enginesize",
-                        "display_name": "Engine Size",
-                        "feature_value": 130,
-                        "value_display": "130",
-                        "importance": 0.6417,
-                        "importance_percent": 64.17,
+                        "feature": "enginesize",
+                        "label": "Engine Size",
+                        "global_importance": 0.6417,
+                        "global_importance_percent": 64.17,
                     },
-                ],
-                "all_features": [
                     {
-                        "rank": 1,
-                        "feature_name": "enginesize",
-                        "display_name": "Engine Size",
-                        "feature_value": 130,
-                        "value_display": "130",
-                        "importance": 0.6417,
-                        "importance_percent": 64.17,
+                        "feature": "curbweight",
+                        "label": "Curb Weight",
+                        "global_importance": 0.1659,
+                        "global_importance_percent": 16.59,
                     },
                 ],
+                "feature_values": {
+                    "enginesize": {"value": 130, "label": "Engine Size", "display": "130"},
+                    "drivewheel": {"value": "rwd", "label": "Drive Wheel", "display": "Rear Wheel Drive (RWD)"},
+                },
             }
         }

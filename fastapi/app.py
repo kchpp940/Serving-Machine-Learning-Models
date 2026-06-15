@@ -11,7 +11,6 @@ from fastapi import HTTPException
 from models import (
     CarPrediction,
     PredictionResponse,
-    PredictionWithExplanationResponse,
     ExplainResponse,
 )
 import numpy as np
@@ -89,6 +88,7 @@ async def get_schema():
         "numeric_features": model.numeric_features,
         "categorical_features": model.categorical_features,
         "target_column": model.target_column,
+        "feature_labels": {f: model.schema.label(f) for f in model.feature_order},
         "categorical_options": {
             f: model.categorical_options(f) for f in model.categorical_features
         },
@@ -110,13 +110,14 @@ async def get_feature_importance():
         sorted_features = sorted(
             [
                 {
-                    "feature_name": f,
-                    "importance": score,
-                    "importance_percent": round(score * 100, 2),
+                    "feature": f,
+                    "label": model.schema.label(f),
+                    "global_importance": score,
+                    "global_importance_percent": round(score * 100, 2),
                 }
                 for f, score in importances.items()
             ],
-            key=lambda x: x["importance"],
+            key=lambda x: x["global_importance"],
             reverse=True,
         )
         return {
@@ -131,7 +132,7 @@ async def get_feature_importance():
 
 @app.post(
     "/predict",
-    response_model=Union[PredictionResponse, PredictionWithExplanationResponse],
+    response_model=Union[PredictionResponse, ExplainResponse],
     summary="Predict car price",
     response_description="Predicted car price, optionally with feature explanation",
 )
@@ -163,10 +164,11 @@ def predict(
             )
 
         explanation = model.explain_from_pydantic(data, top_k=top_k)
-        return PredictionWithExplanationResponse(
+        return ExplainResponse(
             prediction=value,
             model_name=explanation["model_name"],
             top_features=explanation["top_features"],
+            feature_values=explanation["feature_values"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -180,7 +182,7 @@ def predict(
     "/explain",
     response_model=ExplainResponse,
     summary="Explain a car price prediction",
-    response_description="Detailed prediction explanation with feature contributions",
+    response_description="Prediction with global feature importance and input feature values",
 )
 def explain_prediction(
     data: CarPrediction,
@@ -207,7 +209,7 @@ def explain_prediction(
             prediction=value,
             model_name=explanation["model_name"],
             top_features=explanation["top_features"],
-            all_features=explanation["all_features"],
+            feature_values=explanation["feature_values"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

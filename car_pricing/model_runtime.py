@@ -12,8 +12,6 @@ from car_pricing.feature_schema import (
     TARGET_COLUMN,
     bundle_model,
     is_model_bundle,
-    feature_display_name,
-    feature_value_display,
 )
 
 try:
@@ -200,29 +198,33 @@ class CarPriceModel:
 
         importances = self.feature_importances()
 
-        features = []
+        all_features = []
         for feature in self.feature_order:
             raw_value = values.get(feature)
-            features.append({
-                "feature_name": feature,
-                "display_name": feature_display_name(feature),
-                "feature_value": raw_value,
-                "value_display": feature_value_display(feature, raw_value),
-                "importance": importances[feature],
-                "importance_percent": round(importances[feature] * 100, 2),
+            all_features.append({
+                "feature": feature,
+                "label": self.schema.label(feature),
+                "global_importance": importances[feature],
+                "global_importance_percent": round(importances[feature] * 100, 2),
             })
 
-        features.sort(key=lambda x: x["importance"], reverse=True)
+        all_features.sort(key=lambda x: x["global_importance"], reverse=True)
 
-        for i, f in enumerate(features):
-            f["rank"] = i + 1
+        top_features = all_features[:top_k] if top_k and top_k > 0 else all_features
 
-        top_features = features[:top_k] if top_k and top_k > 0 else features
+        feature_values = {}
+        for feature in self.feature_order:
+            raw_value = values.get(feature)
+            feature_values[feature] = {
+                "value": raw_value,
+                "label": self.schema.label(feature),
+                "display": self.schema.display_value(feature, raw_value),
+            }
 
         return {
             "model_name": self.model_name,
             "top_features": top_features,
-            "all_features": features,
+            "feature_values": feature_values,
         }
 
     def explain_from_pydantic(self, data, top_k: int = 5) -> dict:
