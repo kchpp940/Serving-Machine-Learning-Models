@@ -137,7 +137,10 @@ class CarPriceModel:
 
     @property
     def schema_version(self) -> str:
-        return self.schema.schema_version()
+        if self.schema.schema_version is not None:
+            return self.schema.schema_version
+        from car_pricing.versioning import compute_schema_version
+        return compute_schema_version(self.schema.to_dict(include_encoders=False))
 
     @property
     def data_version(self):
@@ -156,7 +159,11 @@ class CarPriceModel:
         return self.schema.categorical_options(field_name)
 
     def to_schema_dict(self, include_encoders: bool = True) -> dict:
-        return self.schema.to_dict(include_encoders=include_encoders)
+        from car_pricing.versioning import compute_schema_version
+        result = self.schema.to_dict(include_encoders=include_encoders)
+        if "schema_version" not in result:
+            result["schema_version"] = self.schema.schema_version or compute_schema_version(result)
+        return result
 
     # ---------- 编码 ----------
 

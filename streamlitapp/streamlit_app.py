@@ -7,6 +7,7 @@ import streamlit as st
 import requests as re
 
 from car_pricing.feature_schema import FeatureSchema
+from car_pricing.versioning import compute_schema_version
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
@@ -14,7 +15,9 @@ REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 def _fallback_schema_dict() -> dict:
     schema = FeatureSchema.default()
-    return schema.to_dict(include_encoders=False)
+    schema_dict = schema.to_dict(include_encoders=False)
+    schema_dict["schema_version"] = compute_schema_version(schema_dict)
+    return schema_dict
 
 
 @st.cache_data(show_spinner=False)

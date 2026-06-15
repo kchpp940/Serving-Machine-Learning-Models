@@ -11,6 +11,7 @@ from car_pricing.feature_schema import (
 )
 
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing import versioning
 
 __all__ = [
     "FeatureSchema",
@@ -23,4 +24,6 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "versioning",
 ]
+
