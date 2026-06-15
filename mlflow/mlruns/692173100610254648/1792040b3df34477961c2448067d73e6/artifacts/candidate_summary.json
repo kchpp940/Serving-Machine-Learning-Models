@@ -1,0 +1,50 @@
+{
+  "primary_metric": "r2_score",
+  "higher_is_better": true,
+  "best_model": "RandomForest",
+  "best_run_id": "9b5d7f7da6a94ebbba04a31e4b45e0d7",
+  "best_metric_value": 0.9579190642755482,
+  "schema_version": "64f48c7cfbf3",
+  "data_version": "3ad389bc1c1d",
+  "candidates": [
+    {
+      "model_name": "GradientBoosting",
+      "run_id": "02d8bebe229c4f77838d3db6389cb87b",
+      "metrics": {
+        "r2_score": 0.9162060173401337,
+        "mse": 6615033.916690156,
+        "mae": 1691.920129093448
+      },
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.1,
+        "max_depth": 3,
+        "random_state": 42
+      }
+    },
+    {
+      "model_name": "RandomForest",
+      "run_id": "9b5d7f7da6a94ebbba04a31e4b45e0d7",
+      "metrics": {
+        "r2_score": 0.9579190642755482,
+        "mse": 3322038.2684666603,
+        "mae": 1243.7370406504062
+      },
+      "params": {
+        "n_estimators": 100,
+        "max_depth": null,
+        "random_state": 42
+      }
+    },
+    {
+      "model_name": "LinearRegression",
+      "run_id": "acbc8dc52b8745a899a857bc403bcaf2",
+      "metrics": {
+        "r2_score": 0.8232934458167175,
+        "mse": 13949925.903017417,
+        "mae": 2673.0200471008416
+      },
+      "params": {}
+    }
+  ]
+}

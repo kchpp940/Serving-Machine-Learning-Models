@@ -1,0 +1,15 @@
+artifact_path: file:///Users/pkcha/Serving-Machine-Learning-Models/mlflow/mlruns/692173100610254648/models/m-1914dc55ff154919b25d18413a4f8a2a/artifacts
+flavors:
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.7.2
+    skops_trusted_types: null
+mlflow_version: 3.12.0
+model_id: m-1914dc55ff154919b25d18413a4f8a2a
+model_size_bytes: 128122
+model_uuid: m-1914dc55ff154919b25d18413a4f8a2a
+prompts: null
+run_id: a678c70c9dd44f4cb7d3dc2f79e895f8
+utc_time_created: '2026-06-15 03:51:09.407162'

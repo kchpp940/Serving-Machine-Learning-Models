@@ -108,7 +108,9 @@ def select_best_run(candidates, primary_metric, higher_is_better):
 def main():
     csv_path = os.path.join(os.path.dirname(__file__), "data", "cars.csv")
     experiment_name = "car_price_candidates"
+    tracking_uri = os.path.join(os.path.dirname(__file__), "mlruns")
 
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
     df = load_training_data(csv_path)
@@ -181,18 +183,35 @@ def main():
             ],
         }
 
+        summary_json = json.dumps(summary, indent=2)
         summary_path = os.path.join(os.path.dirname(__file__), "candidate_summary.json")
         with open(summary_path, "w") as f:
-            json.dump(summary, f, indent=2)
+            f.write(summary_json)
 
         mlflow.log_artifact(summary_path)
+        mlflow.log_dict(summary, "candidate_summary.json")
+        mlflow.log_param("candidate_summary", summary_json)
+        mlflow.log_param("best_run_id", best["run_id"])
+        mlflow.log_param("best_model", best["model_name"])
+        mlflow.log_param("best_metric_value", best["metrics"][PRIMARY_METRIC])
         mlflow.set_tag("best_model", best["model_name"])
         mlflow.set_tag("best_run_id", best["run_id"])
+        mlflow.set_tag("parent_run_type", "candidate_comparison")
 
-        print(f"\nCandidate summary saved to: {summary_path}")
+        for c in candidates:
+            mlflow.log_metric(f"{c['model_name']}_r2_score", c["metrics"]["r2_score"])
+            mlflow.log_metric(f"{c['model_name']}_mse", c["metrics"]["mse"])
+            mlflow.log_metric(f"{c['model_name']}_mae", c["metrics"]["mae"])
+
+        print(f"\n{'='*50}")
         print(f"Parent run ID: {parent_run.info.run_id}")
+        print(f"Tracking URI: {tracking_uri}")
+        print(f"Best model: {best['model_name']} (run: {best['run_id']})")
+        print(f"Use with publish script:")
+        print(f"  python publish_best_run.py --parent-run-id {parent_run.info.run_id}")
+        print(f"  or: python publish_best_run.py --best-run-id {best['run_id']}")
 
-        return summary
+        return summary, parent_run.info.run_id, tracking_uri
 
 
 if __name__ == "__main__":

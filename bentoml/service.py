@@ -1,35 +1,28 @@
 import sys
 import os
+import importlib.util
 
 _bento_dir = os.path.abspath(os.path.dirname(__file__))
 _project_root = os.path.abspath(os.path.join(_bento_dir, ".."))
 
-_syspath_paths_to_remove = [
-    "",
-    ".",
-    _bento_dir,
-    _project_root,
-]
-for p in _syspath_paths_to_remove:
-    while p in sys.path:
-        sys.path.remove(p)
+_bentoml_safe_path = os.path.join(_project_root, "car_pricing", "bentoml_safe.py")
+_bentoml_spec = importlib.util.spec_from_file_location(
+    "car_pricing_bentoml_safe",
+    _bentoml_safe_path,
+)
+_bentoml_safe_module = importlib.util.module_from_spec(_bentoml_spec)
+sys.modules["car_pricing_bentoml_safe"] = _bentoml_safe_module
+_bentoml_spec.loader.exec_module(_bentoml_safe_module)
 
-import importlib.util
-_bentoml_spec = importlib.util.find_spec("bentoml")
-if _bentoml_spec is not None and _bento_dir in os.path.abspath(_bentoml_spec.origin):
-    raise ImportError(
-        "Local bentoml/ directory conflicts with bentoml package. "
-        "Please rename the local directory or run BentoML from another location."
-    )
-
-import bentoml
-import bentoml.picklable_model
-from bentoml.io import NumpyNdarray, PandasDataFrame, JSON
+bentoml = _bentoml_safe_module.bentoml
+picklable_model = _bentoml_safe_module.picklable_model
+NumpyNdarray = _bentoml_safe_module.NumpyNdarray
+PandasDataFrame = _bentoml_safe_module.PandasDataFrame
+JSON = _bentoml_safe_module.JSON
+Service = _bentoml_safe_module.Service
 
 import numpy as np
 import pandas as pd
-
-sys.path.insert(0, _project_root)
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
@@ -37,9 +30,9 @@ from car_pricing.feature_schema import FEATURE_ORDER
 
 BENTO_MODEL_NAME = "car_price_model"
 
-predictor = bentoml.picklable_model.get(BENTO_MODEL_NAME + ":latest").to_runner()
+predictor = picklable_model.get(BENTO_MODEL_NAME + ":latest").to_runner()
 
-svc = bentoml.Service(BENTO_MODEL_NAME, runners=[predictor])
+svc = Service(BENTO_MODEL_NAME, runners=[predictor])
 
 
 def _desanitize_value(val):
@@ -53,8 +46,8 @@ def _desanitize_value(val):
 
 
 def _get_model_bundle():
-    bento_model = bentoml.picklable_model.get(BENTO_MODEL_NAME + ":latest")
-    raw_bundle = bentoml.picklable_model.load_model(BENTO_MODEL_NAME + ":latest")
+    bento_model = picklable_model.get(BENTO_MODEL_NAME + ":latest")
+    raw_bundle = picklable_model.load_model(BENTO_MODEL_NAME + ":latest")
     return raw_bundle, bento_model
 
 
@@ -152,6 +145,7 @@ def metadata(_) -> dict:
         response["deployment"] = {
             "best_model": best_model,
             "best_run_id": candidate_info.get("best_run_id"),
+            "parent_run_id": candidate_info.get("parent_run_id"),
             "primary_metric": primary_metric,
             "higher_is_better": higher_is_better,
             "best_metric_value": candidate_info.get("best_metric_value"),
