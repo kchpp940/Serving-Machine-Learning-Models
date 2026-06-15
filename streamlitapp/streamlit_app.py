@@ -8,6 +8,12 @@ import requests as re
 from datetime import datetime
 
 from car_pricing.api_client import PredictionAPIClient, BentoMLAPIClient
+from car_pricing.service_status import (
+    compare_service_statuses,
+    CONSISTENCY_OK,
+    CONSISTENCY_WARNING,
+    CONSISTENCY_ERROR,
+)
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
@@ -179,7 +185,14 @@ def _fetch_statuses():
     bm_health, bm_health_err = bentoml_client.health()
     bm_status, bm_status_err = bentoml_client.status()
 
-    return fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err
+    consistency_report = compare_service_statuses(
+        fastapi_status=fa_status,
+        bentoml_status=bm_status,
+        fastapi_endpoint_error=fa_status_err,
+        bentoml_endpoint_error=bm_status_err,
+    )
+
+    return fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err, consistency_report
 
 
 def _render_health_badge(name, health_data, health_error):
@@ -209,139 +222,78 @@ def _render_status_card(name, status_data, status_error):
     return status_data
 
 
-def _compare_schemas(fastapi_status, bentoml_status):
-    st.subheader("Schema Consistency Check")
-    fa_sv = fastapi_status.get("schema_version", "N/A") if fastapi_status else "N/A"
-    bm_sv = bentoml_status.get("schema_version", "N/A") if bentoml_status else "N/A"
-    fa_dv = fastapi_status.get("data_version", "N/A") if fastapi_status else "N/A"
-    bm_dv = bentoml_status.get("data_version", "N/A") if bentoml_status else "N/A"
-    fa_nf = fastapi_status.get("n_features", "N/A") if fastapi_status else "N/A"
-    bm_nf = bentoml_status.get("n_features", "N/A") if bentoml_status else "N/A"
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        schema_match = fa_sv == bm_sv and fa_sv != "N/A"
-        st.metric(
-            label="schema_version",
-            value=fa_sv[:8] if fa_sv != "N/A" else "N/A",
-            delta=f"Match" if schema_match else f"BentoML={bm_sv[:8] if bm_sv != 'N/A' else 'N/A'}",
-            delta_color="normal" if schema_match else "inverse",
-        )
-    with col2:
-        data_match = fa_dv == bm_dv and fa_dv != "N/A"
-        st.metric(
-            label="data_version",
-            value=fa_dv[:8] if fa_dv != "N/A" else "N/A",
-            delta=f"Match" if data_match else f"BentoML={bm_dv[:8] if bm_dv != 'N/A' else 'N/A'}",
-            delta_color="normal" if data_match else "inverse",
-        )
-    with col3:
-        nf_match = fa_nf == bm_nf and fa_nf != "N/A"
-        st.metric(
-            label="n_features",
-            value=str(fa_nf),
-            delta=f"Match" if nf_match else f"BentoML={bm_nf}",
-            delta_color="normal" if nf_match else "inverse",
-        )
-
-    if schema_match and data_match and nf_match:
-        st.success("✅ FastAPI and BentoML schemas are consistent")
+def _render_consistency_banner(report):
+    if report.level == CONSISTENCY_OK:
+        st.success(f"### {report.summary}")
+    elif report.level == CONSISTENCY_WARNING:
+        st.warning(f"### {report.summary}")
     else:
-        st.warning("⚠️ Schema mismatch detected between FastAPI and BentoML — verify model artifacts")
-
-    fa_features = fastapi_status.get("feature_order") if fastapi_status else None
-    bm_features = bentoml_status.get("feature_order") if bentoml_status else None
-    if fa_features and bm_features and fa_features != bm_features:
-        st.error(f"Feature order mismatch:\n- FastAPI: {fa_features}\n- BentoML: {bm_features}")
+        st.error(f"### {report.summary}")
 
 
-def _render_model_lineage(fastapi_status, bentoml_status):
-    st.subheader("Model Lineage")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### FastAPI")
-        if fastapi_status:
-            st.write(f"- **API Version**: `{fastapi_status.get('api_version', 'N/A')}`")
-            st.write(f"- **Service Type**: `{fastapi_status.get('service_type', 'N/A')}`")
-            st.write(f"- **Model Mode**: `{fastapi_status.get('model_mode', 'N/A')}`")
-            st.write(f"- **Model Loaded**: `{fastapi_status.get('model_loaded', False)}`")
-            st.write(f"- **Schema Version**: `{fastapi_status.get('schema_version', 'N/A')}`")
-            st.write(f"- **Data Version**: `{fastapi_status.get('data_version', 'N/A')}`")
-            st.write(f"- **N Features**: `{fastapi_status.get('n_features', 'N/A')}`")
-            api_base = fastapi_status.get('api_base_suggestion', 'N/A')
-            st.write(f"- **API Base Suggestion**: `{api_base}`")
-        else:
-            st.write("No FastAPI status data available")
-    with col2:
-        st.markdown("##### BentoML")
-        if bentoml_status:
-            st.write(f"- **API Version**: `{bentoml_status.get('api_version', 'N/A')}`")
-            st.write(f"- **Service Type**: `{bentoml_status.get('service_type', 'N/A')}`")
-            st.write(f"- **Model Mode**: `{bentoml_status.get('model_mode', 'N/A')}`")
-            st.write(f"- **Model Loaded**: `{bentoml_status.get('model_loaded', False)}`")
-            st.write(f"- **Schema Version**: `{bentoml_status.get('schema_version', 'N/A')}`")
-            st.write(f"- **Data Version**: `{bentoml_status.get('data_version', 'N/A')}`")
-            st.write(f"- **N Features**: `{bentoml_status.get('n_features', 'N/A')}`")
-            api_base = bentoml_status.get('api_base_suggestion', 'N/A')
-            st.write(f"- **API Base Suggestion**: `{api_base}`")
-        else:
-            st.write("No BentoML status data available")
+def _render_lineage_table(fastapi_status, bentoml_status):
+    lineage_fields = [
+        ("api_version", "API Version"),
+        ("service_type", "Service Type"),
+        ("model_mode", "Model Mode"),
+        ("model_loaded", "Model Loaded"),
+        ("schema_version", "Schema Version"),
+        ("data_version", "Data Version"),
+        ("n_features", "N Features"),
+        ("feature_order", "Feature Order"),
+        ("api_base_suggestion", "API Base Suggestion"),
+    ]
+    rows = []
+    for field, label in lineage_fields:
+        fa_val = fastapi_status.get(field, "N/A") if fastapi_status else "N/A"
+        bm_val = bentoml_status.get(field, "N/A") if bentoml_status else "N/A"
+        if isinstance(fa_val, list):
+            fa_val = str(fa_val)
+        if isinstance(bm_val, list):
+            bm_val = str(bm_val)
+        match = "✅" if fa_val == bm_val else "❌"
+        rows.append({"Field": label, "FastAPI": str(fa_val), "BentoML": str(bm_val), "Match": match})
+    st.table(rows)
 
 
-def _render_self_check(name, status_data):
-    if not status_data:
+def _render_diffs_table(report):
+    if not report.diffs:
+        st.success("No schema/lineage differences detected")
         return
-    check = status_data.get("last_self_check")
-    if not check:
-        st.write(f"_{name}: no self-check data_")
-        return
-    passed = check.get("passed", False)
-    ts = check.get("timestamp")
-    ts_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown"
-    st.markdown(f"##### {name} Self-Check — {'✅ Passed' if passed else '❌ Failed'} at {ts_str}")
-    checks = check.get("checks", [])
-    if checks:
-        check_rows = [
-            {
-                "Check": c.get("name", "?"),
-                "Passed": "✅" if c.get("passed") else "❌",
-                "Detail": c.get("detail", ""),
-            }
-            for c in checks
-        ]
-        st.table(check_rows)
-    errors = check.get("errors", [])
-    if errors:
-        st.error(f"{name} Errors:\n" + "\n".join(f"- {e}" for e in errors))
+    rows = []
+    for d in report.diffs:
+        sev_icon = "❌" if d.severity == CONSISTENCY_ERROR else "⚠️"
+        fa_val = str(d.fastapi_value) if not isinstance(d.fastapi_value, list) else str(d.fastapi_value)
+        bm_val = str(d.bentoml_value) if not isinstance(d.bentoml_value, list) else str(d.bentoml_value)
+        rows.append({
+            "Severity": sev_icon,
+            "Field": d.field,
+            "FastAPI": fa_val,
+            "BentoML": bm_val,
+        })
+    st.table(rows)
 
 
-def _render_error_details(fastapi_health_err, bentoml_health_err, fastapi_status_err, bentoml_status_err,
-                           fastapi_status, bentoml_status):
-    st.subheader("Error Details")
-    any_error = False
-    if fastapi_health_err:
-        st.error(f"FastAPI /health: {fastapi_health_err}")
-        any_error = True
-    if bentoml_health_err:
-        st.error(f"BentoML /health: {bentoml_health_err}")
-        any_error = True
-    if fastapi_status_err:
-        st.error(f"FastAPI /status: {fastapi_status_err}")
-        any_error = True
-    if bentoml_status_err:
-        st.error(f"BentoML /status: {bentoml_status_err}")
-        any_error = True
+def _render_all_errors(report, fa_health_err, bm_health_err):
+    all_errors = []
 
-    for name, s in [("FastAPI", fastapi_status), ("BentoML", bentoml_status)]:
-        if s:
-            sc = s.get("last_self_check", {})
-            errs = sc.get("errors", [])
-            if errs:
-                for e in errs:
-                    st.error(f"{name} self-check: {e}")
-                    any_error = True
-    if not any_error:
-        st.success("No errors detected across all services")
+    if fa_health_err:
+        all_errors.append({"Service": "FastAPI", "Type": "/health endpoint", "Detail": fa_health_err})
+    if bm_health_err:
+        all_errors.append({"Service": "BentoML", "Type": "/health endpoint", "Detail": bm_health_err})
+
+    for se in report.service_errors:
+        svc = se.service_type
+        for e in se.endpoint_errors:
+            all_errors.append({"Service": svc.capitalize(), "Type": "/status endpoint", "Detail": e})
+        for e in se.self_check_errors:
+            all_errors.append({"Service": svc.capitalize(), "Type": "Self-check", "Detail": e})
+
+    if all_errors:
+        st.error(f"### Error Details ({len(all_errors)} issue(s))")
+        st.table(all_errors)
+    else:
+        st.success("### Error Details — No errors detected across all services")
 
 
 def render_system_status_page():
@@ -353,7 +305,10 @@ def render_system_status_page():
         _fetch_statuses.clear()
         st.experimental_rerun()
 
-    fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err = _fetch_statuses()
+    fa_health, fa_health_err, fa_status, fa_status_err, bm_health, bm_health_err, bm_status, bm_status_err, report = _fetch_statuses()
+
+    st.header("Consistency Summary")
+    _render_consistency_banner(report)
 
     st.header("Service Health")
     col1, col2 = st.columns(2)
@@ -362,26 +317,20 @@ def render_system_status_page():
     with col2:
         _render_health_badge("BentoML", bm_health, bm_health_err)
 
-    st.header("Aggregated Status")
+    st.header("Model Lineage Comparison")
+    _render_lineage_table(fa_status, bm_status)
+
+    st.header("Schema & Version Diffs")
+    _render_diffs_table(report)
+
+    st.header("Aggregated Status (Raw)")
     col1, col2 = st.columns(2)
     with col1:
         _render_status_card("FastAPI", fa_status, fa_status_err)
     with col2:
         _render_status_card("BentoML", bm_status, bm_status_err)
 
-    st.header("Model Lineage & Schema")
-    _render_model_lineage(fa_status, bm_status)
-    _compare_schemas(fa_status, bm_status)
-
-    st.header("Self-Check Results")
-    col1, col2 = st.columns(2)
-    with col1:
-        _render_self_check("FastAPI", fa_status)
-    with col2:
-        _render_self_check("BentoML", bm_status)
-
-    _render_error_details(fa_health_err, bm_health_err, fa_status_err, bm_status_err,
-                          fa_status, bm_status)
+    _render_all_errors(report, fa_health_err, bm_health_err)
 
 
 def main():

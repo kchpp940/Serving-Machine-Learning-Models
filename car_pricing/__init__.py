@@ -29,6 +29,13 @@ from car_pricing.api_client import (
 from car_pricing.service_status import (
     ServiceStatus,
     build_service_status,
+    CONSISTENCY_OK,
+    CONSISTENCY_WARNING,
+    CONSISTENCY_ERROR,
+    ConsistencyDiff,
+    ServiceErrors,
+    ConsistencyReport,
+    compare_service_statuses,
 )
 
 __all__ = [
@@ -52,4 +59,11 @@ __all__ = [
     "BentoMLAPIClient",
     "ServiceStatus",
     "build_service_status",
+    "CONSISTENCY_OK",
+    "CONSISTENCY_WARNING",
+    "CONSISTENCY_ERROR",
+    "ConsistencyDiff",
+    "ServiceErrors",
+    "ConsistencyReport",
+    "compare_service_statuses",
 ]
