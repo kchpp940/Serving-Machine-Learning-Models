@@ -57,6 +57,61 @@ DRIVEWheel_DISPLAY: Dict[str, str] = {
 }
 
 
+FIELD_DISPLAY_NAME_MAP: Dict[str, str] = {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway Miles Per Gallon",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheel Base",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City Miles Per Gallon",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders",
+}
+
+
+def _default_categorical_encoders():
+    if LabelEncoder is None:
+        return {}
+    import numpy as np
+    encoders = {}
+    legacy_classes = {
+        "drivewheel": np.array(["4wd", "fwd", "rwd"]),
+        "cylindernumber": np.array(
+            ["eight", "five", "four", "six", "three", "twelve", "two"]
+        ),
+    }
+    for col, classes in legacy_classes.items():
+        lb = LabelEncoder()
+        lb.fit(classes.astype(str))
+        encoders[col] = lb
+    return encoders
+
+
+def default_schema() -> "FeatureSchema":
+    schema = FeatureSchema()
+    schema.categorical_encoders = _default_categorical_encoders()
+    return schema
+
+
+def default_schema_dict() -> Dict[str, Any]:
+    schema = default_schema()
+    return {
+        "feature_order": list(schema.feature_order),
+        "numeric_features": list(schema.numeric_features),
+        "categorical_features": list(schema.categorical_features),
+        "target_column": schema.target_column,
+        "categorical_options": {
+            f: schema.categorical_options(f) for f in schema.categorical_features
+        },
+    }
+
+
+def field_display_names() -> Dict[str, str]:
+    return dict(FIELD_DISPLAY_NAME_MAP)
+
+
 def _is_string_dtype(dtype) -> bool:
     return pd.api.types.is_string_dtype(dtype) or dtype == "O"
 

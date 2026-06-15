@@ -7,7 +7,6 @@ from kivymd.app import MDApp
 from kivy.lang.builder import Builder
 from kivy.uix.screenmanager import Screen, ScreenManager
 import certifi as cfi
-import requests as re
 
 from car_pricing.api_client import (
     create_client,

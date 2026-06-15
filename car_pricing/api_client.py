@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
-from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.feature_schema import FEATURE_ORDER, default_schema_dict, field_display_names
 
 
 DEFAULT_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
@@ -14,48 +14,8 @@ DEFAULT_FASTAPI_BASE_URL = os.environ.get("FASTAPI_BASE_URL", "http://localhost:
 DEFAULT_BENTOML_BASE_URL = os.environ.get("BENTOML_BASE_URL", "http://localhost:3000")
 
 
-DEFAULT_SCHEMA = {
-    "feature_order": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "drivewheel", "citympg",
-        "boreratio", "cylindernumber",
-    ],
-    "numeric_features": [
-        "enginesize", "curbweight", "horsepower", "highwaympg",
-        "carwidth", "wheelbase", "citympg", "boreratio",
-    ],
-    "categorical_features": ["drivewheel", "cylindernumber"],
-    "target_column": "price",
-    "categorical_options": {
-        "drivewheel": [
-            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
-            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
-            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
-        ],
-        "cylindernumber": [
-            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
-            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
-            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
-            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
-            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
-            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
-            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
-        ],
-    },
-}
-
-FIELD_DISPLAY_NAMES = {
-    "enginesize": "Engine Size",
-    "curbweight": "Curb Weight",
-    "horsepower": "Horsepower",
-    "highwaympg": "Highway Miles Per Gallon",
-    "carwidth": "Car Width",
-    "wheelbase": "Wheel Base",
-    "drivewheel": "Drive Wheel",
-    "citympg": "City Miles Per Gallon",
-    "boreratio": "Bore Ratio",
-    "cylindernumber": "Number of Cylinders",
-}
+DEFAULT_SCHEMA = default_schema_dict()
+FIELD_DISPLAY_NAMES = field_display_names()
 
 
 class ServiceType(str, Enum):
@@ -146,6 +106,27 @@ def _extract_detail(resp: Optional[requests.Response]) -> str:
     return ""
 
 
+_SCHEMA_REQUIRED_FIELDS = [
+    "feature_order", "numeric_features",
+    "categorical_features", "categorical_options",
+]
+
+
+def _validate_schema_payload(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError(f"Schema should be a dict, got {type(data).__name__}")
+    missing = [k for k in _SCHEMA_REQUIRED_FIELDS if k not in data]
+    if missing:
+        raise ValueError(f"Schema missing required fields: {', '.join(missing)}")
+    return data
+
+
+def _validate_prediction_payload(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError(f"Prediction response should be a dict, got {type(data).__name__}")
+    return data
+
+
 class BasePredictionClient:
     service_type: ServiceType
 
@@ -189,6 +170,18 @@ class BasePredictionClient:
                 raw_detail=detail,
             ) from exc
 
+    def _wrap_invalid(self, validator_fn, data):
+        try:
+            return validator_fn(data)
+        except ServiceError:
+            raise
+        except ValueError as e:
+            raise ServiceError(
+                category=ErrorCategory.INVALID_RESPONSE,
+                message=_build_error_message(ErrorCategory.INVALID_RESPONSE, str(e)),
+                raw_detail=str(e),
+            ) from e
+
     def get_schema(self) -> Dict[str, Any]:
         raise NotImplementedError
 
@@ -209,13 +202,16 @@ class FastAPIClient(BasePredictionClient):
     service_type = ServiceType.FASTAPI
 
     def get_schema(self) -> Dict[str, Any]:
-        return self._request("GET", "/schema")
+        data = self._request("GET", "/schema")
+        return self._wrap_invalid(_validate_schema_payload, data)
 
     def predict(self, features: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/predict", json=features)
+        data = self._request("POST", "/predict", json=features)
+        return self._wrap_invalid(_validate_prediction_payload, data)
 
     def predict_batch(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return self._request("POST", "/predict_batch", json={"rows": rows})
+        data = self._request("POST", "/predict_batch", json={"rows": rows})
+        return self._wrap_invalid(_validate_prediction_payload, data)
 
     def get_metadata(self) -> Dict[str, Any]:
         return self._request("GET", "/metadata")
@@ -228,18 +224,20 @@ class BentoMLClient(BasePredictionClient):
     service_type = ServiceType.BENTOML
 
     def get_schema(self) -> Dict[str, Any]:
-        return self._request("POST", "/schema", data="")
+        data = self._request("POST", "/schema", data="")
+        return self._wrap_invalid(_validate_schema_payload, data)
 
     def predict(self, features: Dict[str, Any]) -> Dict[str, Any]:
         ordered = {f: features[f] for f in FEATURE_ORDER}
         result = self._request("POST", "/predict_batch", json={"rows": [ordered]})
         if isinstance(result, dict) and "predictions" in result and result["predictions"]:
-            return {"prediction": result["predictions"][0], "status": "ok"}
-        return result
+            result = {"prediction": result["predictions"][0], "status": "ok"}
+        return self._wrap_invalid(_validate_prediction_payload, result)
 
     def predict_batch(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         ordered_rows = [{f: row[f] for f in FEATURE_ORDER} for row in rows]
-        return self._request("POST", "/predict_batch", json={"rows": ordered_rows})
+        data = self._request("POST", "/predict_batch", json={"rows": ordered_rows})
+        return self._wrap_invalid(_validate_prediction_payload, data)
 
     def get_metadata(self) -> Dict[str, Any]:
         return self._request("POST", "/metadata", data="")

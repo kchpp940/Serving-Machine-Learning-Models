@@ -8,6 +8,9 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
     is_model_bundle,
+    default_schema,
+    default_schema_dict,
+    field_display_names,
 )
 
 from car_pricing.model_runtime import CarPriceModel
@@ -37,6 +40,9 @@ __all__ = [
     "prepare_training_data",
     "bundle_model",
     "is_model_bundle",
+    "default_schema",
+    "default_schema_dict",
+    "field_display_names",
     "CarPriceModel",
     "ServiceType",
     "ErrorCategory",

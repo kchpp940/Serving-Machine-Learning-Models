@@ -30,10 +30,6 @@ def fetch_schema():
     client = _get_client()
     try:
         data = client.get_schema()
-        required = ["feature_order", "numeric_features", "categorical_features", "categorical_options"]
-        missing = [k for k in required if k not in data]
-        if missing:
-            return None, f"Schema missing fields: {', '.join(missing)}"
         return data, None
     except ServiceError as e:
         return None, e.message
