@@ -1,12 +1,37 @@
 import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from kivymd.app import MDApp
 from kivy.lang.builder import Builder
 from kivy.uix.screenmanager import Screen, ScreenManager
 import certifi as cfi
-import requests as re
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
+from car_pricing.api_client import (
+    create_client,
+    ServiceError,
+    ServiceType,
+)
+
+
+SERVICE_TYPE = os.environ.get("API_SERVICE_TYPE", "fastapi")
+BASE_URL = os.environ.get("API_BASE_URL")
+TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
+
+
+FIELD_ID_MAP = [
+    ("enginesize", "input_1"),
+    ("curbweight", "input_2"),
+    ("horsepower", "input_3"),
+    ("highwaympg", "input_4"),
+    ("carwidth", "input_5"),
+    ("wheelbase", "input_6"),
+    ("drivewheel", "input_7"),
+    ("citympg", "input_8"),
+    ("boreratio", "input_9"),
+    ("cylindernumber", "input_10"),
+]
 
 
 Builder_string = """
@@ -158,55 +183,29 @@ sm.add_widget(Main(name="main"))
 class MainApp(MDApp):
     def build(self):
         self.help_string = Builder.load_string(Builder_string)
+        self._client = create_client(
+            service_type=SERVICE_TYPE,
+            base_url=BASE_URL,
+            timeout=TIMEOUT,
+            verify_ssl=cfi.where(),
+        )
         return self.help_string
 
+    def _collect_inputs(self):
+        screen = self.help_string.get_screen("main")
+        values = {}
+        for field, input_id in FIELD_ID_MAP:
+            values[field] = screen.ids[input_id].text
+        return values
+
     def predict(self):
-        enginesize = self.help_string.get_screen("main").ids.input_1.text
-        curbweight = self.help_string.get_screen("main").ids.input_2.text
-        horsepower = self.help_string.get_screen("main").ids.input_3.text
-        highwaympg = self.help_string.get_screen("main").ids.input_4.text
-        carwidth = self.help_string.get_screen("main").ids.input_5.text
-        wheelbase = self.help_string.get_screen("main").ids.input_6.text
-        drivewheel = self.help_string.get_screen("main").ids.input_7.text
-        citympg = self.help_string.get_screen("main").ids.input_8.text
-        boreratio = self.help_string.get_screen("main").ids.input_9.text
-        cylindernumber = self.help_string.get_screen("main").ids.input_10.text
-        values = {
-            "enginesize": enginesize,
-            "curbweight": curbweight,
-            "horsepower": horsepower,
-            "highwaympg": highwaympg,
-            "carwidth": carwidth,
-            "wheelbase": wheelbase,
-            "drivewheel": drivewheel,
-            "citympg": citympg,
-            "boreratio": boreratio,
-            "cylindernumber": cylindernumber
-        }
-        url = f"{API_BASE_URL.rstrip('/')}/predict"
         output = self.help_string.get_screen("main").ids.output_text
+        values = self._collect_inputs()
         try:
-            resp = re.post(url=url, json=values, timeout=REQUEST_TIMEOUT, verify=cfi.where())
-            resp.raise_for_status()
-            body = resp.json()
-            prediction = body.get("prediction")
-            if prediction is None:
-                output.text = f"Error: unexpected response from server"
-            else:
-                output.text = f"Predicted Price: {prediction:.2f}$"
-        except re.exceptions.ConnectionError:
-            output.text = "Error: cannot connect to prediction service"
-        except re.exceptions.Timeout:
-            output.text = "Error: request timed out, please try again"
-        except re.exceptions.HTTPError:
-            detail = ""
-            try:
-                detail = resp.json().get("detail", "")
-            except Exception:
-                pass
-            output.text = f"Server error: {detail or 'unknown error'}"
-        except ValueError:
-            output.text = "Error: invalid response from server"
+            result = self._client.predict(values)
+            output.text = f"Predicted Price: {result.prediction:.2f}$"
+        except ServiceError as e:
+            output.text = f"Error: {e.message}"
         except Exception as e:
             output.text = f"Error: {str(e)}"
 

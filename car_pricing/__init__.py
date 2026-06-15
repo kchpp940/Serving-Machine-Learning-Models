@@ -12,35 +12,23 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
-from car_pricing.model_lineage import (
-    ModelLineage,
-    load_lineage,
-)
-
-from car_pricing.versioning import (
-    compute_schema_version,
-    compute_data_version,
-    compute_artifact_hash,
-)
-
 from car_pricing.api_client import (
-    API_VERSION,
-    API_BASE_SUGGESTIONS,
-    detect_api_base,
-    PredictionAPIClient,
-    BentoMLAPIClient,
-)
-
-from car_pricing.service_status import (
+    ServiceType,
+    ErrorCategory,
+    ServiceError,
+    SchemaInfo,
+    PredictionResult,
+    BatchPredictionResult,
+    ServiceMetadata,
     ServiceStatus,
-    build_service_status,
-    CONSISTENCY_OK,
-    CONSISTENCY_WARNING,
-    CONSISTENCY_ERROR,
-    ConsistencyDiff,
-    ServiceErrors,
-    ConsistencyReport,
-    compare_service_statuses,
+    BasePredictionClient,
+    FastAPIClient,
+    BentoMLClient,
+    create_client,
+    DEFAULT_TIMEOUT,
+    DEFAULT_FASTAPI_BASE_URL,
+    DEFAULT_BENTOML_BASE_URL,
+    DEFAULT_FALLBACK_SCHEMA,
 )
 
 __all__ = [
@@ -54,23 +42,20 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "ModelLineage",
-    "load_lineage",
-    "compute_schema_version",
-    "compute_data_version",
-    "compute_artifact_hash",
-    "API_VERSION",
-    "API_BASE_SUGGESTIONS",
-    "detect_api_base",
-    "PredictionAPIClient",
-    "BentoMLAPIClient",
+    "ServiceType",
+    "ErrorCategory",
+    "ServiceError",
+    "SchemaInfo",
+    "PredictionResult",
+    "BatchPredictionResult",
+    "ServiceMetadata",
     "ServiceStatus",
-    "build_service_status",
-    "CONSISTENCY_OK",
-    "CONSISTENCY_WARNING",
-    "CONSISTENCY_ERROR",
-    "ConsistencyDiff",
-    "ServiceErrors",
-    "ConsistencyReport",
-    "compare_service_statuses",
+    "BasePredictionClient",
+    "FastAPIClient",
+    "BentoMLClient",
+    "create_client",
+    "DEFAULT_TIMEOUT",
+    "DEFAULT_FASTAPI_BASE_URL",
+    "DEFAULT_BENTOML_BASE_URL",
+    "DEFAULT_FALLBACK_SCHEMA",
 ]

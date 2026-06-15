@@ -1,19 +1,27 @@
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pandas as pd
 import joblib
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse, JSONResponse
-from fastapi import HTTPException
-from models import CarPrediction, PredictionResponse
 import numpy as np
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse, FileResponse, JSONResponse
+from fastapi import HTTPException
+
+from models import (
+    CarPrediction,
+    PredictionResponse,
+    BatchPredictionRequest,
+    BatchPredictionResponse,
+    ServiceMetadataResponse,
+    ServiceStatusResponse,
+)
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing.service_status import build_service_status
 
 
 app = FastAPI(
@@ -24,6 +32,7 @@ app = FastAPI(
 )
 
 _model: CarPriceModel = None
+_start_time: float = None
 
 
 def get_model() -> CarPriceModel:
@@ -39,6 +48,8 @@ def get_model() -> CarPriceModel:
 
 @app.on_event("startup")
 async def startup_event():
+    global _start_time
+    _start_time = time.time()
     try:
         model = get_model()
         print(f"Model loaded successfully. Mode: {model.mode}")
@@ -64,24 +75,7 @@ favicon_path = "favicon.png"
 
 @app.get("/favicon.png", include_in_schema=False)
 async def favicon():
-    from fastapi.responses import FileResponse
     return FileResponse(favicon_path)
-
-
-@app.get("/health")
-async def health():
-    try:
-        model = get_model()
-        model.schema.validate()
-        return {"status": "healthy", "model_loaded": True}
-    except Exception as e:
-        return {"status": "unhealthy", "model_loaded": False, "error": str(e)}
-
-
-@app.get("/metadata")
-async def get_metadata():
-    model = get_model()
-    return model.get_metadata()
 
 
 @app.get("/schema")
@@ -98,23 +92,6 @@ async def get_schema():
     }
 
 
-@app.get("/status")
-async def get_status():
-    try:
-        model = get_model()
-    except Exception:
-        model = None
-    data_csv = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "Data", "cars.csv")
-    )
-    status = build_service_status(
-        service_type="fastapi",
-        model=model,
-        data_csv_path=data_csv,
-    )
-    return status.to_dict()
-
-
 @app.post("/predict", response_model=PredictionResponse)
 def predict(data: CarPrediction):
     try:
@@ -126,3 +103,50 @@ def predict(data: CarPrediction):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+
+
+@app.post("/predict_batch", response_model=BatchPredictionResponse)
+def predict_batch(request: BatchPredictionRequest):
+    try:
+        model = get_model()
+        predictions = []
+        for row in request.rows:
+            pred = model.predict_from_pydantic(row)
+            predictions.append(float(pred[0]))
+        return BatchPredictionResponse(
+            predictions=predictions,
+            count=len(predictions),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批量预测失败: {str(e)}")
+
+
+@app.get("/metadata", response_model=ServiceMetadataResponse)
+async def get_metadata():
+    try:
+        model = get_model()
+        return ServiceMetadataResponse(
+            service_name="Car Price Prediction API",
+            version="0.0.1",
+            model_name="sklearn_gbr",
+            model_mode=model.mode,
+            n_features=model.schema.n_features(),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取元数据失败: {str(e)}")
+
+
+@app.get("/status", response_model=ServiceStatusResponse)
+async def get_status():
+    global _start_time
+    model_loaded = _model is not None
+    uptime = None
+    if _start_time is not None:
+        uptime = time.time() - _start_time
+    return ServiceStatusResponse(
+        status="running" if model_loaded else "loading",
+        uptime_seconds=uptime,
+        model_loaded=model_loaded,
+    )
