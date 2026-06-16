@@ -9,51 +9,40 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.config import RuntimeConfig, load_config, get_config
 from car_pricing.versioning import compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
     build_fastapi_status,
 )
+from car_pricing.artifact_paths import ArtifactPaths
 
 
 class ModelService:
     _instance: Optional["ModelService"] = None
 
-    def __init__(self, model_dir: Optional[str] = None, config: Optional[RuntimeConfig] = None):
-        if config is None:
-            if model_dir is not None:
-                config = load_config(model_dir=model_dir)
-            else:
-                config = get_config()
-
-        self._config: RuntimeConfig = config
-        self._model_dir = config.model_dir
-        self._model_path = config.model_path
-        self._metadata_path = config.model_metadata_path
+    def __init__(self, model_dir: Optional[str] = None):
+        if model_dir is None:
+            self._paths = ArtifactPaths.for_car_pricing_api_service(__file__)
+        else:
+            self._paths = ArtifactPaths.from_dir(model_dir)
 
         self._model: Optional[CarPriceModel] = None
         self._lineage: Optional[ModelLineage] = None
 
-    @property
-    def config(self) -> RuntimeConfig:
-        return self._config
-
     @classmethod
-    def get_instance(
-        cls,
-        model_dir: Optional[str] = None,
-        config: Optional[RuntimeConfig] = None,
-    ) -> "ModelService":
+    def get_instance(cls, model_dir: Optional[str] = None) -> "ModelService":
         if cls._instance is None:
-            cls._instance = cls(model_dir=model_dir, config=config)
+            cls._instance = cls(model_dir=model_dir)
         return cls._instance
+
+    @property
+    def paths(self) -> ArtifactPaths:
+        return self._paths
 
     def load(self) -> None:
         if self._model is None:
-            if not os.path.exists(self._model_path):
-                raise RuntimeError(f"模型文件不存在: {self._model_path}")
-            self._model = CarPriceModel.from_joblib(self._model_path)
+            self._paths.assert_model_file_exists()
+            self._model = CarPriceModel.from_joblib(self._paths.model_file)
             self._model.schema.validate()
 
     @property
@@ -66,8 +55,8 @@ class ModelService:
         if self._lineage is None:
             model = self.model
 
-            if os.path.exists(self._metadata_path):
-                with open(self._metadata_path, "r", encoding="utf-8") as f:
+            if self._paths.metadata_file_exists():
+                with open(self._paths.metadata_file, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
                 self._lineage = ModelLineage(
                     run_id=metadata.get("run_id", ""),
@@ -76,14 +65,14 @@ class ModelService:
                     model_type=metadata.get("model_type", ""),
                     schema_version=metadata.get("schema_version", model.schema.schema_version()),
                     data_version=metadata.get("data_version", ""),
-                    model_artifact_hash=metadata.get("model_artifact_hash", compute_file_hash(self._model_path)),
+                    model_artifact_hash=metadata.get("model_artifact_hash", compute_file_hash(self._paths.model_file)),
                     metrics=dict(metadata.get("metrics", {})),
                     params=dict(metadata.get("params", {})),
                     parent_run_id=metadata.get("parent_run_id"),
                     schema=model.schema,
                 )
             else:
-                model_artifact_hash = compute_file_hash(self._model_path)
+                model_artifact_hash = compute_file_hash(self._paths.model_file)
                 self._lineage = ModelLineage(
                     run_id="",
                     experiment_id="",

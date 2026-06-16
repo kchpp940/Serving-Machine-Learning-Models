@@ -13,13 +13,15 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
-from car_pricing.config import load_config
+from car_pricing.artifact_paths import ArtifactPaths
 
 
 def main():
-    config = load_config()
-    csv_path = config.data_csv_path
-    df = load_training_data(csv_path)
+    paths = ArtifactPaths.for_fastapi_train(__file__)
+    paths.assert_training_data_file_exists()
+    paths.ensure_model_dir()
+
+    df = load_training_data(paths.training_data_file)
 
     X, y, schema = prepare_training_data(df)
 
@@ -31,12 +33,9 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    model_dir = config.model_dir
-    os.makedirs(model_dir, exist_ok=True)
-    model_path = config.model_path
-    joblib.dump(bundle, model_path)
+    joblib.dump(bundle, paths.model_file)
 
-    print(f"Model saved to {model_path}")
+    print(f"Model saved to {paths.model_file}")
     print(f"Feature order: {schema.feature_order}")
     print(f"Number of features: {schema.n_features()}")
     print(f"Model n_features_in_: {model.n_features_in_}")

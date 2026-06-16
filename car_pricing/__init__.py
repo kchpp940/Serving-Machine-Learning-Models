@@ -12,20 +12,29 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
-from car_pricing.config import (
-    RuntimeConfig,
-    load_config,
-    get_config,
-    reload_config,
-    EnvVarMeta,
-    export_env_schema,
-    env_schema_to_list,
-    validate_env_coverage,
+from car_pricing.versioning import (
+    compute_file_hash,
+    compute_data_version,
+    compute_content_hash,
 )
 
-from car_pricing.versioning import compute_file_hash, compute_data_version
+from car_pricing.model_lineage import (
+    ModelLineage,
+    build_fastapi_status,
+)
 
-from car_pricing.model_lineage import ModelLineage, build_fastapi_status
+from car_pricing.artifact_paths import (
+    ArtifactPaths,
+    MODEL_FILENAME,
+    METADATA_FILENAME,
+    STATUS_FILENAME,
+    SCHEMA_SNAPSHOT_FILENAME,
+    LINEAGE_FILENAME,
+    DEFAULT_MODEL_DIRNAME,
+    DEFAULT_DATA_DIRNAME,
+    DEFAULT_DATA_FILENAME,
+    BENTOML_MODEL_TAG,
+)
 
 __all__ = [
     "FeatureSchema",
@@ -38,16 +47,19 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "RuntimeConfig",
-    "load_config",
-    "get_config",
-    "reload_config",
-    "EnvVarMeta",
-    "export_env_schema",
-    "env_schema_to_list",
-    "validate_env_coverage",
     "compute_file_hash",
     "compute_data_version",
+    "compute_content_hash",
     "ModelLineage",
     "build_fastapi_status",
+    "ArtifactPaths",
+    "MODEL_FILENAME",
+    "METADATA_FILENAME",
+    "STATUS_FILENAME",
+    "SCHEMA_SNAPSHOT_FILENAME",
+    "LINEAGE_FILENAME",
+    "DEFAULT_MODEL_DIRNAME",
+    "DEFAULT_DATA_DIRNAME",
+    "DEFAULT_DATA_FILENAME",
+    "BENTOML_MODEL_TAG",
 ]

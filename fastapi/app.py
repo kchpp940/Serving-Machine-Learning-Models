@@ -13,9 +13,8 @@ import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing.config import get_config
+from car_pricing.artifact_paths import ArtifactPaths
 
-CONFIG = get_config()
 
 app = FastAPI(
     title="Car Price Prediction API",
@@ -25,15 +24,22 @@ app = FastAPI(
 )
 
 _model: CarPriceModel = None
+_paths: ArtifactPaths = None
+
+
+def get_paths() -> ArtifactPaths:
+    global _paths
+    if _paths is None:
+        _paths = ArtifactPaths.for_fastapi_app(__file__)
+    return _paths
 
 
 def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        model_path = CONFIG.model_path
-        if not os.path.exists(model_path):
-            raise RuntimeError(f"模型文件不存在: {model_path}")
-        _model = CarPriceModel.from_joblib(model_path)
+        paths = get_paths()
+        paths.assert_model_file_exists()
+        _model = CarPriceModel.from_joblib(paths.model_file)
         _model.schema.validate()
     return _model
 
@@ -60,7 +66,7 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
     return note
 
 
-favicon_path = os.path.join(os.path.dirname(__file__), "favicon.png")
+favicon_path = "favicon.png"
 
 
 @app.get("/favicon.png", include_in_schema=False)
@@ -94,16 +100,3 @@ def predict(data: CarPrediction):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    print(f"Starting API server on {CONFIG.bind_address}")
-    print(f"Model directory: {CONFIG.model_dir}")
-    uvicorn.run(
-        "app:app",
-        host=CONFIG.api_host,
-        port=CONFIG.api_port,
-        reload=True,
-    )

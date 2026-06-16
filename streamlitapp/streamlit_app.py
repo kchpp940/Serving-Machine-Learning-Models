@@ -1,16 +1,9 @@
-import sys
 import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 import streamlit as st
 import requests as re
 
-from car_pricing.config import get_config
-
-CONFIG = get_config()
-API_BASE_URL = CONFIG.api_base_url
-REQUEST_TIMEOUT = CONFIG.request_timeout
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
 
 DEFAULT_SCHEMA = {
     "feature_order": [

@@ -15,19 +15,20 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
-from car_pricing.config import load_config
 from car_pricing.versioning import compute_data_version, compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
     build_fastapi_status,
 )
+from car_pricing.artifact_paths import ArtifactPaths
 
 
 def main():
-    config = load_config()
+    paths = ArtifactPaths.for_car_pricing_api_train(__file__)
+    paths.assert_training_data_file_exists()
+    paths.ensure_model_dir()
 
-    csv_path = config.data_csv_path
-    df = load_training_data(csv_path)
+    df = load_training_data(paths.training_data_file)
 
     X, y, schema = prepare_training_data(df)
 
@@ -42,7 +43,7 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    data_version = compute_data_version(csv_path)
+    data_version = compute_data_version(paths.training_data_file)
     schema_version = schema.schema_version()
 
     y_pred = model.predict(X_test)
@@ -52,12 +53,9 @@ def main():
         "mae": mean_absolute_error(y_test, y_pred),
     }
 
-    model_dir = config.model_dir
-    os.makedirs(model_dir, exist_ok=True)
-    model_path = config.model_path
-    joblib.dump(bundle, model_path)
+    joblib.dump(bundle, paths.model_file)
 
-    model_artifact_hash = compute_file_hash(model_path)
+    model_artifact_hash = compute_file_hash(paths.model_file)
 
     lineage = ModelLineage(
         run_id="",
@@ -76,15 +74,13 @@ def main():
         schema=schema,
     )
 
-    metadata_path = config.model_metadata_path
-    with open(metadata_path, "w", encoding="utf-8") as f:
+    with open(paths.metadata_file, "w", encoding="utf-8") as f:
         json.dump(lineage.to_dict(), f, indent=2, ensure_ascii=False)
 
-    status_path = config.model_status_path
-    with open(status_path, "w", encoding="utf-8") as f:
+    with open(paths.status_file, "w", encoding="utf-8") as f:
         json.dump(build_fastapi_status(lineage), f, indent=2, ensure_ascii=False)
 
-    print(f"Model saved to {model_path}")
+    print(f"Model saved to {paths.model_file}")
     print(f"Model name: {model_name}")
     print(f"Model type: {model_type}")
     print(f"Feature order: {schema.feature_order}")
@@ -94,8 +90,8 @@ def main():
     print(f"Data version: {data_version}")
     print(f"Model artifact hash: {model_artifact_hash}")
     print(f"Metrics: {metrics}")
-    print(f"Metadata saved to {metadata_path}")
-    print(f"Status saved to {status_path}")
+    print(f"Metadata saved to {paths.metadata_file}")
+    print(f"Status saved to {paths.status_file}")
 
 
 if __name__ == "__main__":

@@ -2,20 +2,15 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, FileResponse
-
-from car_pricing.config import get_config
 
 from services.model_service import ModelService
 from routers.prediction import router as prediction_router
 from routers.schema import router as schema_router
 from routers.meta import router as meta_router
 
-
-CONFIG = get_config()
 
 app = FastAPI(
     title="Car Price Prediction API",
@@ -24,7 +19,7 @@ app = FastAPI(
     debug=True,
 )
 
-favicon_path = os.path.join(os.path.dirname(__file__), "favicon.png")
+favicon_path = "favicon.png"
 
 
 @app.on_event("startup")
@@ -65,17 +60,3 @@ async def favicon():
 app.include_router(meta_router)
 app.include_router(schema_router)
 app.include_router(prediction_router)
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    print(f"Starting API server on {CONFIG.bind_address}")
-    print(f"Model directory: {CONFIG.model_dir}")
-    print(f"API base URL: {CONFIG.api_base_url}")
-    uvicorn.run(
-        "app:app",
-        host=CONFIG.api_host,
-        port=CONFIG.api_port,
-        reload=True,
-    )
