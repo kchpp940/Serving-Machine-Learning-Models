@@ -45,13 +45,11 @@ def build_prediction_request_model(
     return model_cls
 
 
-CarPrediction = build_prediction_request_model()
-
-
 def build_batch_request_model(
     item_model: Type[BaseModel],
     schema_dict: Optional[Dict[str, Any]] = None,
     model_name: str = "BatchPredictionRequest",
+    field_name: str = "rows",
 ) -> Type[BaseModel]:
     if schema_dict is not None:
         order = schema_dict.get("feature_order", FEATURE_ORDER)
@@ -61,7 +59,7 @@ def build_batch_request_model(
         defaults = FIELD_DEFAULT_VALUES
 
     example = {
-        "items": [
+        field_name: [
             {f: defaults.get(f, "") for f in order}
         ]
     }
@@ -69,30 +67,6 @@ def build_batch_request_model(
 
     return create_model(
         model_name,
-        items=(List[item_model], ...),
+        **{field_name: (List[item_model], ...)},
         __config__=config,
     )
-
-
-BatchPredictionRequest = build_batch_request_model(CarPrediction)
-
-
-def rebuild_request_models_from_schema_dict(schema_dict: Dict[str, Any]) -> None:
-    import sys as _sys
-    global CarPrediction, BatchPredictionRequest
-
-    CarPrediction = build_prediction_request_model(
-        schema_dict=schema_dict, model_name="CarPrediction"
-    )
-    BatchPredictionRequest = build_batch_request_model(
-        CarPrediction, schema_dict=schema_dict, model_name="BatchPredictionRequest"
-    )
-
-    this_module = _sys.modules[__name__]
-    this_module.CarPrediction = CarPrediction
-    this_module.BatchPredictionRequest = BatchPredictionRequest
-
-    schemas_module = _sys.modules.get("schemas")
-    if schemas_module is not None:
-        schemas_module.CarPrediction = CarPrediction
-        schemas_module.BatchPredictionRequest = BatchPredictionRequest

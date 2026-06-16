@@ -4,35 +4,25 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from fastapi import APIRouter
-from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.responses import PlainTextResponse
 
-from schemas.responses import StatusResponse, ErrorResponse
-from services.model_service import get_schema_info, get_service_status
-
-router = APIRouter(prefix="", tags=["system"])
-
-favicon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "favicon.png")
+from schemas import StatusResponse
+from services import get_schema_info, get_service_status
 
 
-@router.get("/", response_class=PlainTextResponse)
-async def root():
-    note = """
-Car Price Prediction API 🙌🏻
-Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
-  """
-    return note
+def build_system_router() -> APIRouter:
+    router = APIRouter(prefix="", tags=["system"])
 
+    @router.get("/", response_class=PlainTextResponse)
+    def welcome() -> str:
+        return "Welcome to the Car Price Prediction API!"
 
-@router.get("/favicon.png", include_in_schema=False)
-async def favicon():
-    return FileResponse(favicon_path)
+    @router.get("/schema")
+    def schema():
+        return get_schema_info()
 
+    @router.get("/status", response_model=StatusResponse)
+    def status() -> StatusResponse:
+        return get_service_status()
 
-@router.get("/schema")
-def get_schema():
-    return get_schema_info()
-
-
-@router.get("/status", response_model=StatusResponse, responses={503: {"model": ErrorResponse}})
-def get_status():
-    return get_service_status()
+    return router

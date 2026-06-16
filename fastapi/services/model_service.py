@@ -69,10 +69,10 @@ def predict_single(data) -> Dict[str, Any]:
     }
 
 
-def predict_batch(items: List[Any]) -> Dict[str, Any]:
+def predict_batch(rows: List[Any]) -> Dict[str, Any]:
     service = get_model_service()
     predictions: List[float] = []
-    for item in items:
+    for item in rows:
         pred = service.model.predict_from_pydantic(item)
         predictions.append(float(pred[0]))
     return {
