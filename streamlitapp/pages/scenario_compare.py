@@ -5,13 +5,17 @@ from typing import Dict, List, Any
 import streamlit as st
 import pandas as pd
 
-from car_pricing.api_client import CarPricingApiClient
+from car_pricing.api_client import (
+    CarPricingApiClient,
+    ApiError,
+    BatchPredictionResult,
+)
 
 from ui_helpers import (
-    get_default_schema,
     render_schema_form,
     render_schema_status,
     show_error,
+    show_api_error,
     show_success,
     show_info,
     show_warning,
@@ -26,9 +30,7 @@ from ui_helpers import (
 def _fetch_schema_cached(api_base_url: str, timeout: int):
     client = CarPricingApiClient(base_url=api_base_url, timeout=timeout)
     schema, err = client.fetch_schema()
-    if err:
-        return None, err
-    return schema, None
+    return schema, err
 
 
 def _init_scenarios() -> None:
@@ -47,6 +49,7 @@ def _add_scenario() -> None:
             "name": f"Scenario {scenario_id}",
             "values": {},
             "prediction": None,
+            "error": None,
         }
     )
 
@@ -64,33 +67,78 @@ def _update_scenario_name(scenario_id: int, name: str) -> None:
             break
 
 
+def _collect_batch_data(scenarios: List[Dict[str, Any]], schema: Dict[str, Any]) -> Dict[str, Any]:
+    batch: List[Dict[str, Any]] = []
+    names: List[str] = []
+    indices: List[int] = []
+
+    for i, scenario in enumerate(scenarios):
+        values = {}
+        for field in schema["feature_order"]:
+            key = f"scen_{scenario['id']}_{field}"
+            values[field] = st.session_state.get(key, scenario["values"].get(field))
+        scenario["values"] = values
+        batch.append(values)
+        names.append(scenario["name"])
+        indices.append(i)
+
+    return {"batch": batch, "names": names, "indices": indices}
+
+
+def _apply_batch_result(
+    scenarios: List[Dict[str, Any]],
+    batch_result: BatchPredictionResult,
+    batch_info: Dict[str, Any],
+) -> None:
+    indices = batch_info["indices"]
+
+    for result in batch_result.results:
+        if result.scenario_name is not None:
+            for idx in indices:
+                if scenarios[idx]["name"] == result.scenario_name:
+                    scenarios[idx]["prediction"] = result.prediction
+                    scenarios[idx]["values"] = result.values
+                    scenarios[idx]["error"] = None
+                    break
+
+    for idx, err in batch_result.errors:
+        if idx < len(indices):
+            scenario_idx = indices[idx]
+            scenarios[scenario_idx]["prediction"] = None
+            scenarios[scenario_idx]["error"] = err
+
+
 def _predict_all(api_client: CarPricingApiClient, schema: Dict[str, Any]) -> None:
     scenarios = st.session_state.scenarios
     if not scenarios:
         show_warning("No scenarios to predict. Add at least one scenario first.")
         return
 
-    success_count = 0
-    for i, scenario in enumerate(scenarios):
-        values = {}
-        for field in schema["feature_order"]:
-            key = f"scen_{scenario['id']}_{field}"
-            values[field] = st.session_state.get(key, scenario["values"].get(field))
+    batch_info = _collect_batch_data(scenarios, schema)
 
-        scenario["values"] = values
-        prediction, err = api_client.predict(values)
-        if err:
-            scenario["prediction"] = None
-            scenario["error"] = err
-        else:
-            scenario["prediction"] = prediction
-            scenario["error"] = None
-            success_count += 1
+    with st.spinner(f"Predicting {len(batch_info['batch'])} scenarios..."):
+        batch_result, err = api_client.predict_batch(
+            batch_info["batch"],
+            scenario_names=batch_info["names"],
+        )
 
-    if success_count == len(scenarios):
+    if err:
+        show_api_error(err)
+        return
+
+    if batch_result is None:
+        show_error("Failed to get batch prediction results.")
+        return
+
+    _apply_batch_result(scenarios, batch_result, batch_info)
+
+    success_count = len(batch_result.results)
+    total = len(scenarios)
+
+    if success_count == total:
         show_success(f"Successfully predicted {success_count} scenarios.")
     elif success_count > 0:
-        show_warning(f"Predicted {success_count} of {len(scenarios)} scenarios. Some had errors.")
+        show_warning(f"Predicted {success_count} of {total} scenarios. Some had errors.")
     else:
         show_error("All predictions failed.")
 
@@ -105,13 +153,9 @@ def render(api_client: CarPricingApiClient) -> None:
 
     _init_scenarios()
 
-    schema, schema_error = _fetch_schema_cached(api_client.base_url, api_client.timeout)
-    using_fallback = False
-    if schema_error is not None:
-        schema = get_default_schema()
-        using_fallback = True
+    schema, schema_err = _fetch_schema_cached(api_client.base_url, api_client.timeout)
 
-    render_schema_status(schema, using_fallback, api_client.base_url)
+    render_schema_status(schema, schema_err, api_client.base_url)
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
@@ -167,7 +211,10 @@ def render(api_client: CarPricingApiClient) -> None:
             if scenario.get("prediction") is not None:
                 st.success(f"Predicted Price: {format_currency(scenario['prediction'])}")
             elif scenario.get("error"):
-                st.error(f"Prediction failed: {scenario['error']}")
+                if isinstance(scenario["error"], ApiError):
+                    show_api_error(scenario["error"])
+                else:
+                    show_error(f"Prediction failed: {scenario['error']}")
 
     if all_predictions:
         st.subheader("Comparison Results")

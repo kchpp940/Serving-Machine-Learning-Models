@@ -5,65 +5,28 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 import pandas as pd
 
-from car_pricing.feature_schema import (
-    FEATURE_ORDER,
-    NUMERIC_FEATURES,
-    CATEGORICAL_FEATURES,
-    TARGET_COLUMN,
-    FIELD_DISPLAY_NAMES,
-    FIELD_DEFAULT_VALUES,
-    _display_name,
-)
+from car_pricing.api_client import ApiError
 
 
-DEFAULT_SCHEMA: Dict[str, Any] = {
-    "feature_order": list(FEATURE_ORDER),
-    "numeric_features": list(NUMERIC_FEATURES),
-    "categorical_features": list(CATEGORICAL_FEATURES),
-    "target_column": TARGET_COLUMN,
-    "categorical_options": {
-        "drivewheel": [
-            {"display": "Four Wheel Drive (4WD)", "form_value": "4wd", "model_code": 0},
-            {"display": "Front Wheel Drive (FWD)", "form_value": "fwd", "model_code": 1},
-            {"display": "Rear Wheel Drive (RWD)", "form_value": "rwd", "model_code": 2},
-        ],
-        "cylindernumber": [
-            {"display": "2 cylinders", "form_value": "two", "model_code": 6},
-            {"display": "3 cylinders", "form_value": "three", "model_code": 4},
-            {"display": "4 cylinders", "form_value": "four", "model_code": 2},
-            {"display": "5 cylinders", "form_value": "five", "model_code": 1},
-            {"display": "6 cylinders", "form_value": "six", "model_code": 3},
-            {"display": "8 cylinders", "form_value": "eight", "model_code": 0},
-            {"display": "12 cylinders", "form_value": "twelve", "model_code": 5},
-        ],
-    },
-    "display_names": dict(FIELD_DISPLAY_NAMES),
-    "default_values": dict(FIELD_DEFAULT_VALUES),
-}
-
-
-def get_default_schema() -> Dict[str, Any]:
-    return dict(DEFAULT_SCHEMA)
-
-
-def field_display_name(field_name: str, schema: Optional[Dict[str, Any]] = None) -> str:
-    if schema and "display_names" in schema:
+def field_display_name(field_name: str, schema: Dict[str, Any]) -> str:
+    if "display_names" in schema:
         return schema["display_names"].get(field_name, field_name.replace("_", " ").title())
-    return FIELD_DISPLAY_NAMES.get(field_name, field_name.replace("_", " ").title())
+    return field_name.replace("_", " ").title()
 
 
-def field_default_value(field_name: str, schema: Optional[Dict[str, Any]] = None) -> Any:
-    if schema and "default_values" in schema:
-        if field_name in schema["default_values"]:
-            return schema["default_values"][field_name]
-    if field_name in FIELD_DEFAULT_VALUES:
-        return FIELD_DEFAULT_VALUES[field_name]
-    numeric_features = set(schema["numeric_features"]) if schema else set(NUMERIC_FEATURES)
+def field_default_value(field_name: str, schema: Dict[str, Any]) -> Any:
+    if "default_values" in schema and field_name in schema["default_values"]:
+        return schema["default_values"][field_name]
+    numeric_features = set(schema.get("numeric_features", []))
     return 0.0 if field_name in numeric_features else ""
 
 
 def show_error(message: str) -> None:
     st.error(message)
+
+
+def show_api_error(err: ApiError) -> None:
+    st.error(err.display())
 
 
 def show_success(message: str) -> None:
@@ -198,10 +161,10 @@ def display_result_table(df: pd.DataFrame) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-def render_schema_status(schema: Dict[str, Any], using_fallback: bool, api_base_url: str) -> None:
-    if using_fallback:
+def render_schema_status(schema: Dict[str, Any], fetch_err: Optional[ApiError], api_base_url: str) -> None:
+    if fetch_err is not None:
         show_warning(
-            f"Using default schema. The form may not match the server's expectations. "
+            f"{fetch_err.display()} Using default schema. The form may not match the server's expectations. "
             f"Could not reach {api_base_url}"
         )
     else:

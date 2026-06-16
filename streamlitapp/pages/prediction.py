@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from car_pricing.api_client import CarPricingApiClient
+from car_pricing.api_client import CarPricingApiClient, ApiError
 
 from ui_helpers import (
-    get_default_schema,
     render_schema_form,
     render_schema_status,
     show_error,
+    show_api_error,
     show_success,
     format_currency,
+    field_display_name,
 )
 
 
@@ -18,9 +19,7 @@ from ui_helpers import (
 def _fetch_schema_cached(api_base_url: str, timeout: int):
     client = CarPricingApiClient(base_url=api_base_url, timeout=timeout)
     schema, err = client.fetch_schema()
-    if err:
-        return None, err
-    return schema, None
+    return schema, err
 
 
 def render(api_client: CarPricingApiClient) -> None:
@@ -28,13 +27,9 @@ def render(api_client: CarPricingApiClient) -> None:
 
     st.write("Enter the details of the car below to get a price prediction.")
 
-    schema, schema_error = _fetch_schema_cached(api_client.base_url, api_client.timeout)
-    using_fallback = False
-    if schema_error is not None:
-        schema = get_default_schema()
-        using_fallback = True
+    schema, schema_err = _fetch_schema_cached(api_client.base_url, api_client.timeout)
 
-    render_schema_status(schema, using_fallback, api_client.base_url)
+    render_schema_status(schema, schema_err, api_client.base_url)
 
     st.subheader("Input Car Details")
     car_name = st.text_input("Name of Car", key="pred_car_name")
@@ -54,14 +49,13 @@ def render(api_client: CarPricingApiClient) -> None:
             prediction, err = api_client.predict(values)
 
         if err:
-            show_error(f"Prediction failed: {err}")
+            show_api_error(err)
         else:
             show_success(f"The estimated price of the **{car_name}** is **{format_currency(prediction)}**")
 
             with st.expander("View Input Details"):
                 st.write("Features used for prediction:")
                 details = {}
-                from ui_helpers import field_display_name
                 for field in schema["feature_order"]:
                     details[field_display_name(field, schema)] = values[field]
                 st.table(details)
