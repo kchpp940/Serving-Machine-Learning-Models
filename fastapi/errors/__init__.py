@@ -1,18 +1,17 @@
 from errors.exceptions import (
     ApiError,
-    ModelNotFoundError,
     InvalidInputError,
+    ModelNotFoundError,
     PredictionError,
     ServiceUnavailableError,
 )
-from errors.handlers import register_exception_handlers, handle_service_call
+from errors.handlers import register_exception_handlers
 
 __all__ = [
     "ApiError",
-    "ModelNotFoundError",
     "InvalidInputError",
+    "ModelNotFoundError",
     "PredictionError",
     "ServiceUnavailableError",
     "register_exception_handlers",
-    "handle_service_call",
 ]

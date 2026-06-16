@@ -6,14 +6,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse, FileResponse
 
-from schemas.responses import (
-    ApiResponse,
-    SchemaResponse,
-    StatusResponse,
-    success_response,
-)
+from schemas.responses import StatusResponse, ErrorResponse
 from services.model_service import get_schema_info, get_service_status
-from errors.handlers import handle_service_call
 
 router = APIRouter(prefix="", tags=["system"])
 
@@ -34,15 +28,11 @@ async def favicon():
     return FileResponse(favicon_path)
 
 
-@router.get("/schema", response_model=ApiResponse[SchemaResponse])
-@handle_service_call
-def get_schema() -> ApiResponse[SchemaResponse]:
-    result = get_schema_info()
-    return success_response(result)
+@router.get("/schema")
+def get_schema():
+    return get_schema_info()
 
 
-@router.get("/status", response_model=ApiResponse[StatusResponse])
-@handle_service_call
-def get_status() -> ApiResponse[StatusResponse]:
-    result = get_service_status()
-    return success_response(result)
+@router.get("/status", response_model=StatusResponse, responses={503: {"model": ErrorResponse}})
+def get_status():
+    return get_service_status()
