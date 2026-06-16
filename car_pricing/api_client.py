@@ -158,10 +158,6 @@ class PredictionResult:
 @dataclass
 class BatchPredictionResult:
     results: List[PredictionResult] = field(default_factory=list)
-    errors: List[Tuple[int, ApiError]] = field(default_factory=list)
-
-    def has_errors(self) -> bool:
-        return len(self.errors) > 0
 
     def predictions(self) -> List[float]:
         return [r.prediction for r in self.results]
@@ -285,22 +281,24 @@ class CarPricingApiClient:
             return None, ApiError.validation_error("Empty batch provided.")
 
         results: List[PredictionResult] = []
-        errors: List[Tuple[int, ApiError]] = []
 
         for i, values in enumerate(batch):
             name = scenario_names[i] if scenario_names and i < len(scenario_names) else None
             prediction, err = self.predict(values)
             if err:
-                errors.append((i, err))
-            else:
-                results.append(PredictionResult(
-                    prediction=prediction,
-                    values=values,
-                    scenario_name=name,
-                ))
+                return None, ApiError(
+                    message=f"Batch prediction failed at index {i}",
+                    kind=err.kind,
+                    status_code=err.status_code,
+                    detail=err.display(),
+                )
+            results.append(PredictionResult(
+                prediction=prediction,
+                values=values,
+                scenario_name=name,
+            ))
 
-        batch_result = BatchPredictionResult(results=results, errors=errors)
-        return batch_result, None
+        return BatchPredictionResult(results=results), None
 
     def get_health(self) -> Tuple[Optional[HealthStatus], Optional[ApiError]]:
         data, err = self._get("/health")

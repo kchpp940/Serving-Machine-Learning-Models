@@ -7,7 +7,6 @@ import pandas as pd
 
 from car_pricing.api_client import (
     CarPricingApiClient,
-    ApiError,
     BatchPredictionResult,
 )
 
@@ -49,7 +48,6 @@ def _add_scenario() -> None:
             "name": f"Scenario {scenario_id}",
             "values": {},
             "prediction": None,
-            "error": None,
         }
     )
 
@@ -70,9 +68,8 @@ def _update_scenario_name(scenario_id: int, name: str) -> None:
 def _collect_batch_data(scenarios: List[Dict[str, Any]], schema: Dict[str, Any]) -> Dict[str, Any]:
     batch: List[Dict[str, Any]] = []
     names: List[str] = []
-    indices: List[int] = []
 
-    for i, scenario in enumerate(scenarios):
+    for scenario in scenarios:
         values = {}
         for field in schema["feature_order"]:
             key = f"scen_{scenario['id']}_{field}"
@@ -80,9 +77,8 @@ def _collect_batch_data(scenarios: List[Dict[str, Any]], schema: Dict[str, Any])
         scenario["values"] = values
         batch.append(values)
         names.append(scenario["name"])
-        indices.append(i)
 
-    return {"batch": batch, "names": names, "indices": indices}
+    return {"batch": batch, "names": names}
 
 
 def _apply_batch_result(
@@ -90,22 +86,13 @@ def _apply_batch_result(
     batch_result: BatchPredictionResult,
     batch_info: Dict[str, Any],
 ) -> None:
-    indices = batch_info["indices"]
+    name_to_scenario = {s["name"]: s for s in scenarios}
 
     for result in batch_result.results:
-        if result.scenario_name is not None:
-            for idx in indices:
-                if scenarios[idx]["name"] == result.scenario_name:
-                    scenarios[idx]["prediction"] = result.prediction
-                    scenarios[idx]["values"] = result.values
-                    scenarios[idx]["error"] = None
-                    break
-
-    for idx, err in batch_result.errors:
-        if idx < len(indices):
-            scenario_idx = indices[idx]
-            scenarios[scenario_idx]["prediction"] = None
-            scenarios[scenario_idx]["error"] = err
+        if result.scenario_name and result.scenario_name in name_to_scenario:
+            scenario = name_to_scenario[result.scenario_name]
+            scenario["prediction"] = result.prediction
+            scenario["values"] = result.values
 
 
 def _predict_all(api_client: CarPricingApiClient, schema: Dict[str, Any]) -> None:
@@ -131,16 +118,7 @@ def _predict_all(api_client: CarPricingApiClient, schema: Dict[str, Any]) -> Non
         return
 
     _apply_batch_result(scenarios, batch_result, batch_info)
-
-    success_count = len(batch_result.results)
-    total = len(scenarios)
-
-    if success_count == total:
-        show_success(f"Successfully predicted {success_count} scenarios.")
-    elif success_count > 0:
-        show_warning(f"Predicted {success_count} of {total} scenarios. Some had errors.")
-    else:
-        show_error("All predictions failed.")
+    show_success(f"Successfully predicted {len(batch_result)} scenarios.")
 
 
 def render(api_client: CarPricingApiClient) -> None:
@@ -210,11 +188,6 @@ def render(api_client: CarPricingApiClient) -> None:
 
             if scenario.get("prediction") is not None:
                 st.success(f"Predicted Price: {format_currency(scenario['prediction'])}")
-            elif scenario.get("error"):
-                if isinstance(scenario["error"], ApiError):
-                    show_api_error(scenario["error"])
-                else:
-                    show_error(f"Prediction failed: {scenario['error']}")
 
     if all_predictions:
         st.subheader("Comparison Results")
