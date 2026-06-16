@@ -280,21 +280,28 @@ class CarPricingApiClient:
         if not batch:
             return None, ApiError.validation_error("Empty batch provided.")
 
-        results: List[PredictionResult] = []
+        payload = {"items": batch}
+        data, err = self._post("/predict_batch", payload)
+        if err:
+            return None, err
 
-        for i, values in enumerate(batch):
+        predictions = data.get("predictions")
+        if predictions is None or not isinstance(predictions, list):
+            return None, ApiError.validation_error(
+                f"Unexpected batch response format from server: {data}"
+            )
+
+        if len(predictions) != len(batch):
+            return None, ApiError.validation_error(
+                f"Prediction count mismatch: expected {len(batch)}, got {len(predictions)}"
+            )
+
+        results: List[PredictionResult] = []
+        for i, prediction in enumerate(predictions):
             name = scenario_names[i] if scenario_names and i < len(scenario_names) else None
-            prediction, err = self.predict(values)
-            if err:
-                return None, ApiError(
-                    message=f"Batch prediction failed at index {i}",
-                    kind=err.kind,
-                    status_code=err.status_code,
-                    detail=err.display(),
-                )
             results.append(PredictionResult(
-                prediction=prediction,
-                values=values,
+                prediction=float(prediction),
+                values=batch[i],
                 scenario_name=name,
             ))
 

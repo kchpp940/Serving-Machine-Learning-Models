@@ -7,7 +7,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from fastapi import APIRouter, HTTPException
 
-from models import CarPrediction, PredictionResponse
+from models import (
+    CarPrediction,
+    PredictionResponse,
+    BatchPredictionRequest,
+    BatchPredictionResponse,
+)
 from services.model_service import ModelService
 
 router = APIRouter(tags=["Prediction"])
@@ -23,3 +28,15 @@ def predict(data: CarPrediction):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+
+
+@router.post("/predict_batch", response_model=BatchPredictionResponse)
+def predict_batch(data: BatchPredictionRequest):
+    try:
+        service = ModelService.get_instance()
+        values = service.predict_batch(data.items)
+        return BatchPredictionResponse(predictions=values, count=len(values))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批量预测失败: {str(e)}")

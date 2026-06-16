@@ -3,7 +3,10 @@ from __future__ import annotations
 import sys
 import os
 import json
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
+
+import numpy as np
+import pandas as pd
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -89,6 +92,16 @@ class ModelService:
         model = self.model
         predictions = model.predict_from_pydantic(data)
         return float(predictions[0])
+
+    def predict_batch(self, items: list) -> List[float]:
+        model = self.model
+        rows = [
+            {f: getattr(item, f) for f in model.feature_order}
+            for item in items
+        ]
+        df = pd.DataFrame(rows, columns=model.feature_order)
+        predictions = model.predict_dataframe(df)
+        return [float(v) for v in predictions]
 
     def get_schema(self) -> Dict[str, Any]:
         model = self.model

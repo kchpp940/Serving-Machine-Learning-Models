@@ -48,3 +48,43 @@ class PredictionResponse(BaseModel):
                 "status": "ok",
             }
         }
+
+
+class BatchPredictionRequest(BaseModel):
+    items: list[CarPrediction]
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "items": [
+                    CarPrediction.Config.schema_extra["example"],
+                    {
+                        "enginesize": 150,
+                        "curbweight": 2700,
+                        "horsepower": 130,
+                        "highwaympg": 30,
+                        "carwidth": 66.0,
+                        "wheelbase": 95.0,
+                        "drivewheel": "fwd",
+                        "citympg": 24,
+                        "boreratio": 3.60,
+                        "cylindernumber": "four",
+                    },
+                ]
+            }
+        }
+
+
+class BatchPredictionResponse(BaseModel):
+    predictions: list[float]
+    count: int
+    status: str = "ok"
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "predictions": [13295.27, 16500.00],
+                "count": 2,
+                "status": "ok",
+            }
+        }
