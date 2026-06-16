@@ -173,11 +173,6 @@ class CarPriceModel:
         encoded = {f: self.encode_feature(f, getattr(data, f)) for f in self.feature_order}
         return self.predict_encoded(encoded)
 
-    # ---------- Schema 导出 ----------
-
-    def to_schema_dict(self, include_encoders: bool = True) -> dict:
-        return self.schema.to_dict(include_encoders=include_encoders)
-
     # ---------- 导出 bundle ----------
 
     def to_bundle(self) -> dict:
