@@ -63,7 +63,7 @@
 不同部署平台对路径等变量有不同的默认值约定：
 
 | 变量名 | Schema本地默认 | Docker/Heroku | Shell 脚本 | Vercel |
-|--------|-----------------|---------------|---------------|---------------|
+|--------|-----------------|-----------------|-----------------|-----------------|
 | `API_HOST` | `0.0.0.0` | 同左 | 同左 | 同左 |
 | `API_PORT` | `8000` | 同左 | 同左 | 同左 |
 | `MODEL_DIR` | `<auto-resolved>` | `/app/shared_models` | `$PROJECT_ROOT/shared_models` | 同左 |
@@ -80,16 +80,16 @@
 
 ## 如何新增/修改配置
 
-1. 编辑 `car_pricing/config.py`，在 `export_env_schema()` 中添加/修改变量定义
+1. 编辑 `car_pricing/config.py`，在 `_build_env_var_registry()` 中添加/修改变量的 EnvVarMeta 定义
 2. 如果需要全局 `_DEFAULT_*` 常量，在文件顶部添加
-3. 如果变量在不同部署目标有不同默认值（如绝对路径），在脚本顶部的 `DEPLOYMENT_VALUE_OVERRIDES` 添加映射
-4. 运行以下命令自动更新所有部署配置：
+3. 如果变量在不同部署目标有不同默认值，直接在该 EnvVarMeta 的 `deployment_defaults` 字段中定义
+4. 运行以下命令自动更新所有配置产物：
 
 ```bash
 # 从 schema 重新生成所有配置产物（推荐）
 python scripts/generate_config_artifacts.py
 
-# 仅更新部署文件（Dockerfile/heroku/vercel 等）
+# 仅更新部署文件（.env.example + Dockerfile/Procfile/vercel.json/heroku.yml 标记段）
 python scripts/generate_config_artifacts.py deploy
 
 # 仅预览变更，不写入文件

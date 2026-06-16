@@ -1,0 +1,19 @@
+
+
+  "__BEGIN_AUTO_GENERATED_ENV_VARS__": "不要手动修改此段，由 scripts/generate_config_artifacts.py 管理",
+  "__AUTO_GENERATED_ENV_VARS__": [
+    {"key": "API_HOST", "value": "0.0.0.0"},
+    {"key": "API_PORT", "value": "8000"},
+    {"key": "MODEL_DIR", "value": "<auto-resolved>"},
+    {"key": "MODEL_FILENAME", "value": "sklearn_gbr.pkl"},
+    {"key": "MODEL_METADATA_FILENAME", "value": "model_metadata.json"},
+    {"key": "MODEL_STATUS_FILENAME", "value": "model_status.json"},
+    {"key": "SCHEMA_SNAPSHOT_FILENAME", "value": "schema_snapshot.json"},
+    {"key": "LINEAGE_FILENAME", "value": "model_lineage.json"},
+    {"key": "DATA_CSV_FILENAME", "value": "cars.csv"},
+    {"key": "DATA_DIR", "value": "<auto-resolved>"},
+    {"key": "API_BASE_URL", "value": "http://localhost:8000"},
+    {"key": "REQUEST_TIMEOUT", "value": "10"},
+    {"key": "BENTOML_MODEL_TAG", "value": "gbr:latest"}
+  ],
+  "__END_AUTO_GENERATED_ENV_VARS__": "标记结束"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
 API_HOST_DEFAULT = "0.0.0.0"
@@ -20,27 +20,6 @@ BENTOML_MODEL_TAG_DEFAULT = "gbr:latest"
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 AUTO_RESOLVED_MARKER = "<auto-resolved>"
-
-DEPLOYMENT_VALUE_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "MODEL_DIR": {
-        "Schema本地默认": AUTO_RESOLVED_MARKER,
-        "Docker/Heroku": "/app/shared_models",
-        "Shell 脚本": "$PROJECT_ROOT/shared_models",
-        "Vercel": AUTO_RESOLVED_MARKER,
-    },
-    "DATA_DIR": {
-        "Schema本地默认": AUTO_RESOLVED_MARKER,
-        "Docker/Heroku": "/app/Data",
-        "Shell 脚本": "$PROJECT_ROOT/Data",
-        "Vercel": AUTO_RESOLVED_MARKER,
-    },
-    "API_BASE_URL": {
-        "Schema本地默认": API_BASE_URL_DEFAULT,
-        "Docker/Heroku": "http://localhost:${API_PORT}",
-        "Shell 脚本": "http://localhost:$API_PORT",
-        "Vercel": API_BASE_URL_DEFAULT,
-    },
-}
 
 _DEPLOYMENT_COLUMNS: List[str] = [
     "Schema本地默认",
@@ -65,19 +44,13 @@ class EnvVarMeta:
     def value_for(self, deployment: str) -> Any:
         if deployment in self.deployment_defaults:
             return self.deployment_defaults[deployment]
-        if "Schema本地默认" in self.deployment_defaults:
-            return self.deployment_defaults["Schema本地默认"]
         return self.default
 
     def to_schema_dict(self) -> Dict[str, Any]:
+        schema_default = self.value_for("Schema本地默认")
         return {
             "name": self.name,
-            "default": (
-                AUTO_RESOLVED_MARKER
-                if self.name in DEPLOYMENT_VALUE_OVERRIDES
-                   and DEPLOYMENT_VALUE_OVERRIDES[self.name].get("Schema本地默认") == AUTO_RESOLVED_MARKER
-                else self.default
-            ),
+            "default": schema_default,
             "type": self.type,
             "sensitive": self.sensitive,
             "required": self.required,
@@ -90,10 +63,11 @@ _ENV_VAR_META_LIST: List[EnvVarMeta] = []
 
 
 def _register_env_var(meta: EnvVarMeta) -> EnvVarMeta:
-    if meta.name in DEPLOYMENT_VALUE_OVERRIDES:
-        for col in _DEPLOYMENT_COLUMNS:
-            if col not in meta.deployment_defaults and col in DEPLOYMENT_VALUE_OVERRIDES[meta.name]:
-                meta.deployment_defaults[col] = DEPLOYMENT_VALUE_OVERRIDES[meta.name][col]
+    if "Schema本地默认" not in meta.deployment_defaults:
+        if meta.default == "" and meta.name in ("MODEL_DIR", "DATA_DIR"):
+            meta.deployment_defaults["Schema本地默认"] = AUTO_RESOLVED_MARKER
+        else:
+            meta.deployment_defaults["Schema本地默认"] = meta.default
     _ENV_VAR_META_LIST.append(meta)
     return meta
 
@@ -131,6 +105,11 @@ def _build_env_var_registry() -> List[EnvVarMeta]:
         description="模型文件目录。未设置时按优先级解析：./models → ./shared_models → <project_root>/shared_models → <project_root>/models",
         group="Model file locations",
         py_type=str,
+        deployment_defaults={
+            "Docker/Heroku": "/app/shared_models",
+            "Shell 脚本": "$PROJECT_ROOT/shared_models",
+            "Vercel": AUTO_RESOLVED_MARKER,
+        },
     ))
     _register_env_var(EnvVarMeta(
         name="MODEL_FILENAME",
@@ -201,6 +180,11 @@ def _build_env_var_registry() -> List[EnvVarMeta]:
         description="训练数据目录。未设置时按优先级解析：./Data → <project_root>/Data",
         group="Training data locations",
         py_type=str,
+        deployment_defaults={
+            "Docker/Heroku": "/app/Data",
+            "Shell 脚本": "$PROJECT_ROOT/Data",
+            "Vercel": AUTO_RESOLVED_MARKER,
+        },
     ))
     _register_env_var(EnvVarMeta(
         name="API_BASE_URL",
@@ -211,6 +195,10 @@ def _build_env_var_registry() -> List[EnvVarMeta]:
         description="API 基础 URL（供 Streamlit 等客户端调用）",
         group="Client configuration",
         py_type=str,
+        deployment_defaults={
+            "Docker/Heroku": "http://localhost:${API_PORT}",
+            "Shell 脚本": "http://localhost:$API_PORT",
+        },
     ))
     _register_env_var(EnvVarMeta(
         name="REQUEST_TIMEOUT",
