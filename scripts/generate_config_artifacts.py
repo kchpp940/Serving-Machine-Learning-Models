@@ -16,12 +16,10 @@
   ... (自动生成的内容，下次运行会被覆盖)
   # === <SECTION>_GENERATED_END ===
 
-不同部署目标的默认值差异：
-  - Dockerfile: MODEL_DIR=/app/shared_models, DATA_DIR=/app/Data
-  - heroku.yml build.config: 同 Dockerfile
-  - Procfile: 同 Dockerfile，且有 Heroku PORT->API_PORT 映射
-  - fastapi-setup.sh: MODEL_DIR=$PROJECT_ROOT/shared_models 等
-  - vercel.json: 使用 schema 默认值（相对路径）
+部署目标的默认值差异完全由 schema 中 EnvVarMeta.deployment_defaults 控制：
+  - docker/heroku/procfile: 容器内绝对路径 /app/...
+  - shell: 动态 $PROJECT_ROOT/...
+  - vercel: 相对路径 ./...
 
 运行方式：
     python scripts/generate_config_artifacts.py              # 全部生成（推荐）
@@ -66,40 +64,8 @@ CATEGORY_TITLES = {
     "general": "Other",
 }
 
-# ===== 部署目标默认值覆盖映射 =====
-# key: 部署目标名
-# value: {变量名: (默认值覆盖, 是否使用模板语法引用)}
-DEPLOYMENT_VALUE_OVERRIDES: Dict[str, Dict[str, str]] = {
-    # Docker 容器内路径
-    "docker": {
-        "MODEL_DIR": "/app/shared_models",
-        "DATA_DIR": "/app/Data",
-        # API_BASE_URL 可以直接写模板形式
-        "API_BASE_URL": "http://localhost:${API_PORT}",
-    },
-    # Heroku build.config（和 Docker 一样用 /app/...）
-    "heroku": {
-        "MODEL_DIR": "/app/shared_models",
-        "DATA_DIR": "/app/Data",
-    },
-    # Vercel（与本地开发一致，相对路径，MODEL_DIR/DATA_DIR 取实际默认值）
-    "vercel": {
-        "MODEL_DIR": "./shared_models",
-        "DATA_DIR": "./Data",
-    },
-    # 本地 shell 脚本
-    "shell": {
-        "MODEL_DIR": "$PROJECT_ROOT/shared_models",
-        "DATA_DIR": "$PROJECT_ROOT/Data",
-        "API_BASE_URL": "http://localhost:$API_PORT",
-    },
-    # Procfile（Heroku 启动命令，和 Docker 类似）
-    "procfile": {
-        "MODEL_DIR": "/app/shared_models",
-        "DATA_DIR": "/app/Data",
-        "API_BASE_URL": "http://localhost:${API_PORT}",
-    },
-}
+# 部署目标名（所有目标名必须与 schema 中的 deployment_defaults key 完全一致）
+_DEPLOYMENT_TARGETS = {"docker", "heroku", "vercel", "shell", "procfile"}
 
 
 # =============================================================================
@@ -107,21 +73,21 @@ DEPLOYMENT_VALUE_OVERRIDES: Dict[str, Dict[str, str]] = {
 # =============================================================================
 
 def _resolve_value(meta: EnvVarMeta, target: str) -> str:
-    """根据部署目标解析变量的默认值字符串。
+    """根据部署目标解析变量的默认值字符串（单一真相来源：schema 中的 deployment_defaults）。
 
     Args:
         meta: schema 中的变量元数据
         target: 部署目标名 (docker/heroku/vercel/shell/procfile)
     """
-    overrides = DEPLOYMENT_VALUE_OVERRIDES.get(target, {})
-    if meta.name in overrides:
-        return overrides[meta.name]
-    default = meta.default
-    if default == "<auto-resolved>":
-        return default
+    if target not in _DEPLOYMENT_TARGETS:
+        raise ValueError(f"未知部署目标: {target}，必须在 {sorted(_DEPLOYMENT_TARGETS)} 中")
+
+    raw_value = meta.value_for(target)
+    if raw_value == "<auto-resolved>":
+        return str(raw_value)
     if meta.type == "int":
-        return str(int(default))
-    return str(default)
+        return str(int(raw_value))
+    return str(raw_value)
 
 
 def generate_docker_env() -> str:
@@ -314,7 +280,7 @@ def generate_docs_summary() -> str:
     lines.append("")
     lines.append("1. 编辑 `car_pricing/config.py`，在 `export_env_schema()` 中添加/修改变量定义")
     lines.append("2. 如果需要全局 `_DEFAULT_*` 常量，在文件顶部添加")
-    lines.append("3. 如果变量在不同部署目标有不同默认值（如绝对路径），在脚本顶部的 `DEPLOYMENT_VALUE_OVERRIDES` 添加映射")
+    lines.append("3. 如果变量在不同部署目标有不同默认值（如绝对路径），在 `export_env_schema()` 中为该变量添加 `deployment_defaults` 字典")
     lines.append("4. 运行以下命令自动更新所有部署配置：")
     lines.append("")
     lines.append("```bash")

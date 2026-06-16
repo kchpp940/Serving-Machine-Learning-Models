@@ -400,6 +400,98 @@ class TestConfigConsistency:
         assert env_schema["REQUEST_TIMEOUT"].default == _DEFAULT_REQUEST_TIMEOUT
         assert env_schema["BENTOML_MODEL_TAG"].default == _DEFAULT_BENTOML_MODEL_TAG
 
+    def test_generate_script_has_no_hardcoded_variable_list(self, env_schema):
+        """测试 generate_config_artifacts.py 中没有手写维护的变量名/默认值清单。
+
+        所有变量信息必须从 car_pricing.config.export_env_schema() 获取，
+        包括 deployment_defaults 部署目标差异。
+        """
+        script_path = PROJECT_ROOT / "scripts" / "generate_config_artifacts.py"
+        with open(script_path) as f:
+            content = f.read()
+            lines = content.splitlines()
+
+        issues: List[str] = []
+
+        # 检查不存在独立的 DEPLOYMENT_VALUE_OVERRIDES 或类似字典
+        if "DEPLOYMENT_VALUE_OVERRIDES" in content:
+            issues.append("存在 DEPLOYMENT_VALUE_OVERRIDES 独立映射表，应使用 schema 的 deployment_defaults")
+
+        # 检查每个变量名不在生成器函数中以字面量形式出现
+        # （允许在注释、标记格式字符串、import 语句中出现）
+        for var_name, meta in env_schema.items():
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # 跳过注释行
+                if stripped.startswith("#"):
+                    continue
+                # 跳过 import 行
+                if stripped.startswith("import ") or stripped.startswith("from "):
+                    continue
+                # 跳过标记格式字符串（MARKER_START_FMT / MARKER_END_FMT）
+                if "MARKER_START_FMT" in line or "MARKER_END_FMT" in line or "_DEPLOYMENT_TARGETS" in line:
+                    continue
+                # 跳过文件路径匹配（car_pricing_api / fastapi 等目录名）
+                if "DEPLOYMENT_TEMPLATES" in line or "JSON_DEPLOYMENT_FILES" in line:
+                    continue
+                # 跳过 docstring / 多行字符串中描述性内容
+                if stripped.startswith('"""') or stripped.startswith("'''"):
+                    continue
+
+                # 检查变量名作为字符串字面量出现（用引号括起来）
+                if f'"{var_name}"' in line or f"'{var_name}'" in line:
+                    # 例外 1: if meta.name == "VAR_NAME" 形式的逻辑分支判断（不是手写清单）
+                    if f"meta.name == \"{var_name}\"" in line or f"meta.name == '{var_name}'" in line:
+                        continue
+                    # 例外 2: generate_procfile_export 中对 API_PORT 的特殊处理（PORT 映射）
+                    if var_name == "API_PORT" and ("${PORT:-${API_PORT:-8000}}" in line or "'PORT:-'" in line or '"PORT:-"' in line):
+                        continue
+                    # 例外 3: f-string 模板中引用 meta.name（如 f'{meta.name}=...'）
+                    if "meta.name" in line and "f'" in line or 'f"' in line:
+                        continue
+                    issues.append(
+                        f"第 {i} 行: 手写变量名 '{var_name}'，应从 schema 动态获取"
+                    )
+
+                # 检查默认值作为字符串字面量出现（仅检查非平凡的默认值）
+                default_str = str(meta.default)
+                if len(default_str) > 3 and default_str not in ("<auto-resolved>", "8000", "0.0.0.0"):
+                    if f'"{default_str}"' in line or f"'{default_str}'" in line:
+                        issues.append(
+                            f"第 {i} 行: 手写默认值 '{default_str}'（变量 {var_name}），应从 schema 动态获取"
+                        )
+
+        # 检查所有 deployment_defaults 的值也不在脚本中硬编码
+        deployment_targets = {"docker", "heroku", "vercel", "shell", "procfile"}
+        for var_name, meta in env_schema.items():
+            if not meta.deployment_defaults:
+                continue
+            for target, value in meta.deployment_defaults.items():
+                if target not in deployment_targets:
+                    continue
+                value_str = str(value)
+                if len(value_str) > 4 and "$PROJECT_ROOT" not in value_str and "localhost" not in value_str:
+                    for i, line in enumerate(lines, 1):
+                        stripped = line.strip()
+                        if stripped.startswith("#"):
+                            continue
+                        if f'"{value_str}"' in line or f"'{value_str}'" in line:
+                            # 跳过在部署文件路径中的值（如 /app/... 出现在路径中）
+                            if "DEPLOYMENT_TEMPLATES" in lines[max(0, i-5):i+1]:
+                                continue
+                            if "JSON_DEPLOYMENT_FILES" in lines[max(0, i-5):i+1]:
+                                continue
+                            issues.append(
+                                f"第 {i} 行: 手写部署目标默认值 '{value_str}' "
+                                f"（{var_name} @ {target}），应从 schema 的 deployment_defaults 获取"
+                            )
+
+        assert not issues, (
+            "generate_config_artifacts.py 中存在手写变量名/默认值：\n"
+            + "\n".join(f"  - {iss}" for iss in issues)
+            + "\n\n请将这些值移至 car_pricing.config.export_env_schema() 的 deployment_defaults 中"
+        )
+
 
 def run_audit() -> Tuple[int, List[ConfigIssue]]:
     """运行完整的配置审计（非 pytest 模式）。

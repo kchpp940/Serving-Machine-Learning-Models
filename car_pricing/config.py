@@ -191,7 +191,7 @@ def reload_config() -> RuntimeConfig:
 
 @dataclass
 class EnvVarMeta:
-    """环境变量元数据。"""
+    """环境变量元数据（单一真相来源，包括所有部署目标的默认值）。"""
     name: str
     default: Any
     type: str
@@ -200,6 +200,19 @@ class EnvVarMeta:
     expose_in_docs: bool = True
     required_in_deployment: bool = True
     category: str = "general"
+    deployment_defaults: Optional[Dict[str, Any]] = None
+
+    def value_for(self, target: str) -> Any:
+        """获取指定部署目标的默认值。
+
+        Args:
+            target: 部署目标名 (docker/heroku/vercel/shell/procfile)
+        Returns:
+            该目标的默认值；未覆盖时返回全局 default
+        """
+        if self.deployment_defaults and target in self.deployment_defaults:
+            return self.deployment_defaults[target]
+        return self.default
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -211,6 +224,7 @@ class EnvVarMeta:
             "expose_in_docs": self.expose_in_docs,
             "required_in_deployment": self.required_in_deployment,
             "category": self.category,
+            "deployment_defaults": self.deployment_defaults,
         }
 
 
@@ -246,6 +260,13 @@ def export_env_schema() -> Dict[str, EnvVarMeta]:
         type="str",
         description="模型文件目录。未设置时按优先级解析：./models → ./shared_models → <project_root>/shared_models → <project_root>/models",
         category="model",
+        deployment_defaults={
+            "docker": "/app/shared_models",
+            "heroku": "/app/shared_models",
+            "procfile": "/app/shared_models",
+            "shell": "$PROJECT_ROOT/shared_models",
+            "vercel": "./shared_models",
+        },
     ))
 
     _add(EnvVarMeta(
@@ -278,6 +299,13 @@ def export_env_schema() -> Dict[str, EnvVarMeta]:
         type="str",
         description="训练数据目录。未设置时按优先级解析：./Data → <project_root>/Data",
         category="data",
+        deployment_defaults={
+            "docker": "/app/Data",
+            "heroku": "/app/Data",
+            "procfile": "/app/Data",
+            "shell": "$PROJECT_ROOT/Data",
+            "vercel": "./Data",
+        },
     ))
 
     _add(EnvVarMeta(
@@ -294,6 +322,11 @@ def export_env_schema() -> Dict[str, EnvVarMeta]:
         type="str",
         description="API 基础 URL（供 Streamlit 等客户端调用）",
         category="client",
+        deployment_defaults={
+            "docker": "http://localhost:${API_PORT}",
+            "procfile": "http://localhost:${API_PORT}",
+            "shell": "http://localhost:$API_PORT",
+        },
     ))
 
     _add(EnvVarMeta(
