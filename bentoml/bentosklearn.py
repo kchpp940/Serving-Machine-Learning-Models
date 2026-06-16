@@ -14,10 +14,8 @@ from car_pricing.feature_schema import (
     bundle_model,
 )
 from car_pricing.model_lineage import (
-    ModelLineage,
+    record_training_lineage,
     build_bentoml_metadata,
-    compute_data_version,
-    compute_file_hash,
 )
 
 
@@ -38,9 +36,6 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    data_version = compute_data_version(csv_path)
-    schema_version = schema.schema_version()
-
     y_pred = model.predict(X_test)
     metrics = {
         "r2_score": r2_score(y_test, y_pred),
@@ -51,32 +46,25 @@ def main():
     with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
         temp_model_path = f.name
     joblib.dump(bundle, temp_model_path)
-    model_artifact_hash = compute_file_hash(temp_model_path)
 
-    lineage = ModelLineage(
-        run_id="",
-        experiment_id="",
+    lineage = record_training_lineage(
         model_name=model_name,
         model_type=model_type,
-        schema_version=schema_version,
-        data_version=data_version,
-        model_artifact_hash=model_artifact_hash,
-        metrics=metrics,
-        params={
-            "model_name": model_name,
-            "model_type": model_type,
-            "n_features": schema.n_features(),
-        },
+        model=model,
         schema=schema,
+        csv_path=csv_path,
+        model_path=temp_model_path,
+        metrics=metrics,
+        save_metadata=False,
     )
 
     bentoml_metadata = build_bentoml_metadata(lineage)
 
     labels = {
-        "model_type": model_type,
-        "schema_version": schema_version,
-        "data_version": data_version,
-        "model_artifact_hash": model_artifact_hash,
+        "model_type": lineage.model_type,
+        "schema_version": lineage.schema_version,
+        "data_version": lineage.data_version,
+        "model_artifact_hash": lineage.model_artifact_hash,
     }
 
     bentoml.sklearn.save(
@@ -92,14 +80,14 @@ def main():
         pass
 
     print(f"Model saved to BentoML")
-    print(f"Model name: {model_name}")
-    print(f"Model type: {model_type}")
+    print(f"Model name: {lineage.model_name}")
+    print(f"Model type: {lineage.model_type}")
     print(f"Feature order: {schema.feature_order}")
     print(f"Number of features: {schema.n_features()}")
     print(f"Model n_features_in_: {model.n_features_in_}")
-    print(f"Schema version: {schema_version}")
-    print(f"Data version: {data_version}")
-    print(f"Model artifact hash: {model_artifact_hash}")
+    print(f"Schema version: {lineage.schema_version}")
+    print(f"Data version: {lineage.data_version}")
+    print(f"Model artifact hash: {lineage.model_artifact_hash}")
     print(f"Metrics: {metrics}")
 
 

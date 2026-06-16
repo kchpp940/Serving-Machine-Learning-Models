@@ -1,5 +1,4 @@
 import os
-import json
 
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
@@ -13,10 +12,7 @@ from car_pricing.feature_schema import (
     bundle_model,
 )
 from car_pricing.model_lineage import (
-    ModelLineage,
-    build_fastapi_status,
-    compute_data_version,
-    compute_file_hash,
+    record_training_lineage,
 )
 
 
@@ -37,9 +33,6 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    data_version = compute_data_version(csv_path)
-    schema_version = schema.schema_version()
-
     y_pred = model.predict(X_test)
     metrics = {
         "r2_score": r2_score(y_test, y_pred),
@@ -52,45 +45,30 @@ def main():
     model_path = os.path.join(model_dir, "sklearn_gbr.pkl")
     joblib.dump(bundle, model_path)
 
-    model_artifact_hash = compute_file_hash(model_path)
-
-    lineage = ModelLineage(
-        run_id="",
-        experiment_id="",
+    lineage = record_training_lineage(
         model_name=model_name,
         model_type=model_type,
-        schema_version=schema_version,
-        data_version=data_version,
-        model_artifact_hash=model_artifact_hash,
-        metrics=metrics,
-        params={
-            "model_name": model_name,
-            "model_type": model_type,
-            "n_features": schema.n_features(),
-        },
+        model=model,
         schema=schema,
+        csv_path=csv_path,
+        model_path=model_path,
+        metrics=metrics,
+        save_metadata=True,
+        metadata_dir=model_dir,
     )
 
-    metadata_path = os.path.join(model_dir, "model_metadata.json")
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(lineage.to_dict(), f, indent=2, ensure_ascii=False)
-
-    status_path = os.path.join(model_dir, "model_status.json")
-    with open(status_path, "w", encoding="utf-8") as f:
-        json.dump(build_fastapi_status(lineage), f, indent=2, ensure_ascii=False)
-
     print(f"Model saved to {model_path}")
-    print(f"Model name: {model_name}")
-    print(f"Model type: {model_type}")
+    print(f"Model name: {lineage.model_name}")
+    print(f"Model type: {lineage.model_type}")
     print(f"Feature order: {schema.feature_order}")
     print(f"Number of features: {schema.n_features()}")
     print(f"Model n_features_in_: {model.n_features_in_}")
-    print(f"Schema version: {schema_version}")
-    print(f"Data version: {data_version}")
-    print(f"Model artifact hash: {model_artifact_hash}")
+    print(f"Schema version: {lineage.schema_version}")
+    print(f"Data version: {lineage.data_version}")
+    print(f"Model artifact hash: {lineage.model_artifact_hash}")
     print(f"Metrics: {metrics}")
-    print(f"Metadata saved to {metadata_path}")
-    print(f"Status saved to {status_path}")
+    print(f"Metadata saved to {os.path.join(model_dir, 'model_metadata.json')}")
+    print(f"Status saved to {os.path.join(model_dir, 'model_status.json')}")
 
 
 if __name__ == "__main__":

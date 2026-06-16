@@ -10,9 +10,10 @@ import pandas as pd
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 from car_pricing.model_lineage import (
-    ModelLineage,
+    load_runtime_lineage,
     build_bentoml_metadata,
-    verify_artifact_hash,
+    build_runtime_metadata,
+    build_fastapi_status,
 )
 
 
@@ -67,17 +68,12 @@ def get_lineage():
     if _lineage is None:
         metadata = get_metadata()
         model = get_model()
-        _lineage = ModelLineage(
-            run_id=metadata.get("run_id", ""),
-            experiment_id=metadata.get("experiment_id", ""),
-            model_name=metadata.get("model_name", ""),
-            model_type=metadata.get("model_type", ""),
-            schema_version=metadata.get("schema_version", ""),
-            data_version=metadata.get("data_version", ""),
-            model_artifact_hash=metadata.get("model_artifact_hash", ""),
-            metrics=dict(metadata.get("metrics", {})),
-            params=dict(metadata.get("params", {})),
-            parent_run_id=metadata.get("parent_run_id"),
+
+        bento_model = bentoml.sklearn.get(MODEL_TAG)
+        model_path = bento_model.path
+        _lineage = load_runtime_lineage(
+            model_path=model_path,
+            metadata_dict=metadata,
             schema=model.schema,
         )
     return _lineage

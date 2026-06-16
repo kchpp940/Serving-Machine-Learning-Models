@@ -14,12 +14,12 @@ except ImportError:
 
 from car_pricing.feature_schema import FeatureSchema
 from car_pricing.versioning import (
-    compute_file_hash,
-    compute_dataframe_hash,
-    compute_data_version,
-    compute_schema_hash,
-    compute_object_hash,
-    verify_artifact_hash,
+    compute_file_hash as _compute_file_hash,
+    compute_dataframe_hash as _compute_dataframe_hash,
+    compute_data_version as _compute_data_version,
+    compute_schema_hash as _compute_schema_hash,
+    compute_object_hash as _compute_object_hash,
+    verify_artifact_hash as _verify_artifact_hash,
 )
 
 __all__ = [
@@ -29,12 +29,9 @@ __all__ = [
     "ModelLineage",
     "MLflowLineageReader",
     "MLflowLineageWriter",
-    "compute_file_hash",
-    "compute_dataframe_hash",
-    "compute_data_version",
-    "compute_schema_hash",
-    "compute_object_hash",
-    "verify_artifact_hash",
+    "record_training_lineage",
+    "load_runtime_lineage",
+    "build_runtime_metadata",
     "build_bentoml_metadata",
     "build_fastapi_status",
     "create_candidate_summary_from_runs",
@@ -570,3 +567,104 @@ def create_candidate_summary_from_runs(
         random_state=random_state,
         test_size=test_size,
     )
+
+
+def record_training_lineage(
+    model_name: str,
+    model_type: str,
+    model,
+    schema: FeatureSchema,
+    csv_path: str,
+    model_path: str,
+    metrics: Dict[str, float],
+    params: Optional[Dict[str, Any]] = None,
+    run_id: str = "",
+    experiment_id: str = "",
+    parent_run_id: Optional[str] = None,
+    save_metadata: bool = True,
+    metadata_dir: Optional[str] = None,
+) -> ModelLineage:
+    if params is None:
+        params = {}
+
+    data_version = _compute_data_version(csv_path)
+    schema_version = schema.schema_version()
+    model_artifact_hash = _compute_file_hash(model_path)
+
+    lineage = ModelLineage(
+        run_id=run_id,
+        experiment_id=experiment_id,
+        model_name=model_name,
+        model_type=model_type,
+        schema_version=schema_version,
+        data_version=data_version,
+        model_artifact_hash=model_artifact_hash,
+        metrics=dict(metrics),
+        params={
+            "model_name": model_name,
+            "model_type": model_type,
+            "n_features": schema.n_features(),
+            **params,
+        },
+        parent_run_id=parent_run_id,
+        schema=schema,
+    )
+
+    if save_metadata:
+        if metadata_dir is None:
+            metadata_dir = os.path.dirname(model_path)
+        os.makedirs(metadata_dir, exist_ok=True)
+
+        metadata_path = os.path.join(metadata_dir, "model_metadata.json")
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(lineage.to_dict(), f, indent=2, ensure_ascii=False)
+
+        status_path = os.path.join(metadata_dir, "model_status.json")
+        with open(status_path, "w", encoding="utf-8") as f:
+            json.dump(build_fastapi_status(lineage), f, indent=2, ensure_ascii=False)
+
+    return lineage
+
+
+def load_runtime_lineage(
+    model_path: str,
+    metadata_path: Optional[str] = None,
+    metadata_dict: Optional[Dict[str, Any]] = None,
+    schema: Optional[FeatureSchema] = None,
+) -> ModelLineage:
+    from car_pricing.model_runtime import CarPriceModel
+
+    if schema is None:
+        model = CarPriceModel.from_joblib(model_path)
+        schema = model.schema
+
+    if metadata_dict is not None:
+        metadata = metadata_dict
+    elif metadata_path and os.path.exists(metadata_path):
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+    else:
+        metadata = {}
+
+    model_artifact_hash = metadata.get(
+        "model_artifact_hash", _compute_file_hash(model_path)
+    )
+
+    return ModelLineage(
+        run_id=metadata.get("run_id", ""),
+        experiment_id=metadata.get("experiment_id", ""),
+        model_name=metadata.get("model_name", ""),
+        model_type=metadata.get("model_type", ""),
+        schema_version=metadata.get("schema_version", schema.schema_version()),
+        data_version=metadata.get("data_version", ""),
+        model_artifact_hash=model_artifact_hash,
+        metrics=dict(metadata.get("metrics", {})),
+        params=dict(metadata.get("params", {})),
+        parent_run_id=metadata.get("parent_run_id"),
+        schema=schema,
+        tags=dict(metadata.get("tags", {})),
+    )
+
+
+def build_runtime_metadata(lineage: ModelLineage) -> Dict[str, Any]:
+    return lineage.to_runtime_metadata()
