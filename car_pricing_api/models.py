@@ -1,9 +1,10 @@
 import sys
 import os
+from typing import Any, Dict, List, Union
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
 
@@ -51,40 +52,30 @@ class PredictionResponse(BaseModel):
 
 
 class BatchPredictionRequest(BaseModel):
-    items: list[CarPrediction]
+    items: List[CarPrediction] = Field(default_factory=list)
+    rows: List[CarPrediction] = Field(default_factory=list)
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "items": [
-                    CarPrediction.Config.schema_extra["example"],
-                    {
-                        "enginesize": 150,
-                        "curbweight": 2700,
-                        "horsepower": 130,
-                        "highwaympg": 30,
-                        "carwidth": 66.0,
-                        "wheelbase": 95.0,
-                        "drivewheel": "fwd",
-                        "citympg": 24,
-                        "boreratio": 3.60,
-                        "cylindernumber": "four",
-                    },
-                ]
-            }
-        }
+    @root_validator(pre=True)
+    def _coerce_input(cls, values: Any) -> Dict[str, Any]:
+        if isinstance(values, list):
+            return {"items": values}
+        if isinstance(values, dict):
+            if "items" in values:
+                return {"items": values["items"]}
+            if "rows" in values:
+                return {"items": values["rows"]}
+        return values
+
+    def normalized_items(self) -> List[CarPrediction]:
+        return self.items if self.items else self.rows
 
 
 class BatchPredictionResponse(BaseModel):
-    predictions: list[float]
-    count: int
-    status: str = "ok"
+    predictions: List[float]
 
     class Config:
         schema_extra = {
             "example": {
                 "predictions": [13295.27, 16500.00],
-                "count": 2,
-                "status": "ok",
             }
         }

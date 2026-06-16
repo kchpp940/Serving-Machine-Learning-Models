@@ -34,8 +34,11 @@ def predict(data: CarPrediction):
 def predict_batch(data: BatchPredictionRequest):
     try:
         service = ModelService.get_instance()
-        values = service.predict_batch(data.items)
-        return BatchPredictionResponse(predictions=values, count=len(values))
+        items = data.normalized_items()
+        if not items:
+            raise ValueError("Empty batch: no items provided.")
+        values = service.predict_batch(items)
+        return BatchPredictionResponse(predictions=values)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
