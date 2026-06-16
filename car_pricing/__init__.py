@@ -12,6 +12,15 @@ from car_pricing.feature_schema import (
 
 from car_pricing.model_runtime import CarPriceModel
 
+from car_pricing.versioning import (
+    compute_file_hash,
+    compute_dataframe_hash,
+    compute_data_version,
+    compute_schema_hash,
+    compute_object_hash,
+    verify_artifact_hash,
+)
+
 from car_pricing.model_lineage import (
     CandidateInfo,
     CandidateSummary,
@@ -19,10 +28,6 @@ from car_pricing.model_lineage import (
     ModelLineage,
     MLflowLineageReader,
     MLflowLineageWriter,
-    compute_file_hash,
-    compute_dataframe_hash,
-    compute_data_version,
-    verify_artifact_hash,
     build_bentoml_metadata,
     build_fastapi_status,
     create_candidate_summary_from_runs,
@@ -39,16 +44,18 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "compute_file_hash",
+    "compute_dataframe_hash",
+    "compute_data_version",
+    "compute_schema_hash",
+    "compute_object_hash",
+    "verify_artifact_hash",
     "CandidateInfo",
     "CandidateSummary",
     "ModelArtifactInfo",
     "ModelLineage",
     "MLflowLineageReader",
     "MLflowLineageWriter",
-    "compute_file_hash",
-    "compute_dataframe_hash",
-    "compute_data_version",
-    "verify_artifact_hash",
     "build_bentoml_metadata",
     "build_fastapi_status",
     "create_candidate_summary_from_runs",

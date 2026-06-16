@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field, asdict
@@ -14,6 +13,12 @@ except ImportError:
     MlflowClient = None
 
 from car_pricing.feature_schema import FeatureSchema
+from car_pricing.versioning import (
+    compute_file_hash,
+    compute_dataframe_hash,
+    compute_data_version,
+    verify_artifact_hash,
+)
 
 
 @dataclass
@@ -197,31 +202,6 @@ class ModelLineage:
         return metadata
 
 
-def compute_file_hash(file_path: str, algorithm: str = "sha256") -> str:
-    hasher = hashlib.new(algorithm)
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def compute_dataframe_hash(df) -> str:
-    import pandas as pd
-    csv_content = df.to_csv(index=False)
-    return hashlib.sha256(csv_content.encode("utf-8")).hexdigest()[:12]
-
-
-def compute_data_version(csv_path: str) -> str:
-    return compute_file_hash(csv_path)[:12]
-
-
-def verify_artifact_hash(file_path: str, expected_hash: str) -> bool:
-    if not os.path.exists(file_path):
-        return False
-    actual_hash = compute_file_hash(file_path)
-    return actual_hash == expected_hash
-
-
 def _require_mlflow():
     if mlflow is None or MlflowClient is None:
         raise RuntimeError("需要安装 mlflow 才能使用 MLflow 相关功能")
@@ -337,9 +317,6 @@ class MLflowLineageReader:
             if run.info.run_id == best_run_id:
                 best_model_type = candidate.model_type
                 best_artifact_hash = candidate.model_artifact_hash
-
-        if not candidates and n_candidates:
-            pass
 
         return CandidateSummary(
             primary_metric=primary_metric,

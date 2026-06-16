@@ -15,9 +15,8 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
+from car_pricing.versioning import compute_data_version, compute_file_hash
 from car_pricing.model_lineage import (
-    compute_data_version,
-    compute_file_hash,
     ModelLineage,
     build_fastapi_status,
 )

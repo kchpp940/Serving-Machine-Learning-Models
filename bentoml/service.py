@@ -12,10 +12,10 @@ import pandas as pd
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.versioning import verify_artifact_hash
 from car_pricing.model_lineage import (
     ModelLineage,
     build_bentoml_metadata,
-    verify_artifact_hash,
 )
 
 

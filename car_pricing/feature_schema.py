@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Any
-import hashlib
 import json
 import numpy as np
 import pandas as pd
+
+from car_pricing.versioning import compute_schema_hash
 
 try:
     from sklearn.preprocessing import LabelEncoder
@@ -254,8 +255,7 @@ class FeatureSchema:
                 ]
             else:
                 signature["categorical_options"][f] = []
-        raw = json.dumps(signature, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return compute_schema_hash(signature)
 
     def to_dict(self, include_encoders: bool = True) -> dict:
         result = {
