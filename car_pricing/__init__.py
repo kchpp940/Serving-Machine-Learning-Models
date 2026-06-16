@@ -11,6 +11,7 @@ from car_pricing.feature_schema import (
 )
 
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing.api_client import ApiError, fetch_schema, predict, fetch_health, fetch_status, fetch_metadata
 
 __all__ = [
     "FeatureSchema",
@@ -23,4 +24,10 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
+    "ApiError",
+    "fetch_schema",
+    "predict",
+    "fetch_health",
+    "fetch_status",
+    "fetch_metadata",
 ]

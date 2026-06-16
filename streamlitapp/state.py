@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests as re
 import streamlit as st
 
-
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-REQUEST_TIMEOUT = int(os.environ.get("API_REQUEST_TIMEOUT", "10"))
+from car_pricing.api_client import (
+    ApiError,
+    fetch_schema,
+    predict as _api_predict,
+    fetch_health,
+    fetch_status,
+    fetch_metadata,
+)
 
 APP_TITLE = "Car Price Prediction Web App"
 
@@ -59,10 +62,6 @@ class PredictionResult:
         )
 
 
-def _base_url() -> str:
-    return API_BASE_URL.rstrip("/")
-
-
 def _ensure_key(key: str, default: Any) -> None:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -107,7 +106,7 @@ def get_schema_fetched_at() -> Optional[datetime]:
     return st.session_state[SCHEMA_FETCHED_AT_KEY]
 
 
-def get_schema_error() -> Optional[str]:
+def get_schema_error() -> Optional[ApiError]:
     return st.session_state[SCHEMA_ERROR_KEY]
 
 
@@ -115,69 +114,31 @@ def has_schema() -> bool:
     return st.session_state[SCHEMA_CACHE_KEY] is not None
 
 
-def ensure_schema(force_refresh: bool = False) -> Optional[Dict[str, Any]]:
-    if not force_refresh and has_schema():
+def ensure_schema() -> Optional[Dict[str, Any]]:
+    if has_schema():
         return st.session_state[SCHEMA_CACHE_KEY]
-    if not force_refresh and st.session_state[SCHEMA_ERROR_KEY] is not None:
+    if st.session_state[SCHEMA_ERROR_KEY] is not None:
         return None
 
-    url = f"{_base_url()}/schema"
-    try:
-        resp = re.get(url, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
-        required = ["feature_order", "numeric_features", "categorical_features", "categorical_options"]
-        missing = [k for k in required if k not in data]
-        if missing:
-            st.session_state[SCHEMA_ERROR_KEY] = f"Schema missing fields: {', '.join(missing)}"
-            return None
-        st.session_state[SCHEMA_CACHE_KEY] = data
-        st.session_state[SCHEMA_FETCHED_AT_KEY] = datetime.now()
-        st.session_state[SCHEMA_ERROR_KEY] = None
-        return data
-    except re.exceptions.ConnectionError:
-        st.session_state[SCHEMA_ERROR_KEY] = "Unable to connect to the prediction service to fetch schema."
-    except re.exceptions.Timeout:
-        st.session_state[SCHEMA_ERROR_KEY] = "Schema request timed out."
-    except re.exceptions.HTTPError as e:
-        detail = ""
-        try:
-            detail = resp.json().get("detail", "")
-        except Exception:
-            pass
-        st.session_state[SCHEMA_ERROR_KEY] = f"Server returned error when fetching schema: {detail or str(e)}"
-    except ValueError:
-        st.session_state[SCHEMA_ERROR_KEY] = "Schema response was not valid JSON."
-    except Exception as e:
-        st.session_state[SCHEMA_ERROR_KEY] = f"Unexpected error fetching schema: {str(e)}"
-    return None
+    data, error = fetch_schema()
+    if error is not None:
+        st.session_state[SCHEMA_ERROR_KEY] = error
+        return None
+
+    st.session_state[SCHEMA_CACHE_KEY] = data
+    st.session_state[SCHEMA_FETCHED_AT_KEY] = datetime.now()
+    st.session_state[SCHEMA_ERROR_KEY] = None
+    return data
 
 
-def predict(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
-    url = f"{_base_url()}/predict"
-    try:
-        resp = re.post(url, json=values, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        body = resp.json()
-        prediction = body.get("prediction")
-        if prediction is None:
-            return None, f"Unexpected response format from server: {body}"
-        return float(prediction), None
-    except re.exceptions.ConnectionError:
-        return None, "Unable to connect to the prediction service. Please check that the API server is running."
-    except re.exceptions.Timeout:
-        return None, "The request to the prediction service timed out. Please try again later."
-    except re.exceptions.HTTPError as e:
-        detail = ""
-        try:
-            detail = resp.json().get("detail", "")
-        except Exception:
-            pass
-        return None, f"Server returned an error ({resp.status_code}): {detail or str(e)}"
-    except ValueError:
-        return None, "The server returned an invalid response. Please try again later."
-    except Exception as e:
-        return None, f"An unexpected error occurred: {str(e)}"
+def clear_schema_cache() -> None:
+    st.session_state[SCHEMA_CACHE_KEY] = None
+    st.session_state[SCHEMA_FETCHED_AT_KEY] = None
+    st.session_state[SCHEMA_ERROR_KEY] = None
+
+
+def run_predict(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[ApiError]]:
+    return _api_predict(values)
 
 
 def get_prediction_results() -> List[PredictionResult]:
@@ -233,33 +194,29 @@ def get_service_metadata() -> Optional[Dict[str, Any]]:
     return st.session_state[SERVICE_METADATA_KEY]
 
 
-def refresh_service_status() -> Tuple[bool, Optional[str]]:
-    base = _base_url()
-    last_error: Optional[str] = None
+def refresh_service_status() -> Tuple[bool, Optional[ApiError]]:
+    last_error: Optional[ApiError] = None
 
-    try:
-        resp = re.get(f"{base}/status", timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        st.session_state[SERVICE_STATUS_KEY] = resp.json()
+    status_data, status_err = fetch_status()
+    if status_err is not None:
+        last_error = status_err
+    else:
+        st.session_state[SERVICE_STATUS_KEY] = status_data
         st.session_state[SERVICE_STATUS_REFRESHED_AT_KEY] = datetime.now()
-    except Exception as e:
-        last_error = str(e)
 
-    try:
-        resp = re.get(f"{base}/health", timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        st.session_state[SERVICE_HEALTH_KEY] = resp.json()
-    except Exception as e:
+    health_data, health_err = fetch_health()
+    if health_err is not None:
         if last_error is None:
-            last_error = str(e)
+            last_error = health_err
+    else:
+        st.session_state[SERVICE_HEALTH_KEY] = health_data
 
-    try:
-        resp = re.get(f"{base}/metadata", timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        st.session_state[SERVICE_METADATA_KEY] = resp.json()
-    except Exception as e:
+    metadata_data, metadata_err = fetch_metadata()
+    if metadata_err is not None:
         if last_error is None:
-            last_error = str(e)
+            last_error = metadata_err
+    else:
+        st.session_state[SERVICE_METADATA_KEY] = metadata_data
 
     success = st.session_state[SERVICE_STATUS_KEY] is not None
     return success, last_error

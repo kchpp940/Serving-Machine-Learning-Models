@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import streamlit as st
 
+from car_pricing.api_client import API_BASE_URL
 import state
 
 
@@ -30,7 +31,7 @@ def render() -> None:
     st.write(
         f"""
     Check the health, status, and metadata of the prediction service running at
-    `{state.API_BASE_URL}`.
+    `{API_BASE_URL}`.
     """
     )
 

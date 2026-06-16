@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from car_pricing.api_client import API_BASE_URL, ApiError
 import state
 import ui_helpers
 
@@ -29,7 +30,7 @@ def render() -> None:
         return
 
     st.success(
-        f"Loaded schema from {state.API_BASE_URL} ({len(schema['feature_order'])} features)"
+        f"Loaded schema from {API_BASE_URL} ({len(schema['feature_order'])} features)"
     )
 
     st.subheader("Input Car Details")
@@ -42,9 +43,9 @@ def render() -> None:
             state.set_error_message("Please enter the name of the car.")
         else:
             values = {field: inputs[field] for field in schema["feature_order"]}
-            prediction, error = state.predict(values)
+            prediction, error = state.run_predict(values)
             if error is not None:
-                state.set_error_message(error)
+                state.set_error_message(str(error))
             else:
                 result = state.PredictionResult(
                     scenario_name=car_name,
