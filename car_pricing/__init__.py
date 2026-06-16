@@ -11,15 +11,17 @@ from car_pricing.feature_schema import (
 )
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.api_client import (
-    CarPricingApiClient,
-    ApiError,
-    HealthStatus,
-    PredictionResult,
-    BatchPredictionResult,
-    ServiceMetadata,
-    build_default_schema,
+
+from car_pricing.config import (
+    RuntimeConfig,
+    load_config,
+    get_config,
+    reload_config,
 )
+
+from car_pricing.versioning import compute_file_hash, compute_data_version
+
+from car_pricing.model_lineage import ModelLineage, build_fastapi_status
 
 __all__ = [
     "FeatureSchema",
@@ -32,11 +34,12 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "CarPricingApiClient",
-    "ApiError",
-    "HealthStatus",
-    "PredictionResult",
-    "BatchPredictionResult",
-    "ServiceMetadata",
-    "build_default_schema",
+    "RuntimeConfig",
+    "load_config",
+    "get_config",
+    "reload_config",
+    "compute_file_hash",
+    "compute_data_version",
+    "ModelLineage",
+    "build_fastapi_status",
 ]

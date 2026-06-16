@@ -15,6 +15,7 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
+from car_pricing.config import load_config
 from car_pricing.versioning import compute_data_version, compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
@@ -23,7 +24,9 @@ from car_pricing.model_lineage import (
 
 
 def main():
-    csv_path = os.path.join(os.path.dirname(__file__), "..", "Data", "cars.csv")
+    config = load_config()
+
+    csv_path = config.data_csv_path
     df = load_training_data(csv_path)
 
     X, y, schema = prepare_training_data(df)
@@ -49,9 +52,9 @@ def main():
         "mae": mean_absolute_error(y_test, y_pred),
     }
 
-    model_dir = os.path.join(os.path.dirname(__file__), "models")
+    model_dir = config.model_dir
     os.makedirs(model_dir, exist_ok=True)
-    model_path = os.path.join(model_dir, "sklearn_gbr.pkl")
+    model_path = config.model_path
     joblib.dump(bundle, model_path)
 
     model_artifact_hash = compute_file_hash(model_path)
@@ -73,11 +76,11 @@ def main():
         schema=schema,
     )
 
-    metadata_path = os.path.join(model_dir, "model_metadata.json")
+    metadata_path = config.model_metadata_path
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(lineage.to_dict(), f, indent=2, ensure_ascii=False)
 
-    status_path = os.path.join(model_dir, "model_status.json")
+    status_path = config.model_status_path
     with open(status_path, "w", encoding="utf-8") as f:
         json.dump(build_fastapi_status(lineage), f, indent=2, ensure_ascii=False)
 

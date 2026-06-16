@@ -13,10 +13,12 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
+from car_pricing.config import load_config
 
 
 def main():
-    csv_path = os.path.join(os.path.dirname(__file__), "..", "Data", "cars.csv")
+    config = load_config()
+    csv_path = config.data_csv_path
     df = load_training_data(csv_path)
 
     X, y, schema = prepare_training_data(df)
@@ -29,9 +31,9 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    model_dir = os.path.join(os.path.dirname(__file__), "models")
+    model_dir = config.model_dir
     os.makedirs(model_dir, exist_ok=True)
-    model_path = os.path.join(model_dir, "sklearn_gbr.pkl")
+    model_path = config.model_path
     joblib.dump(bundle, model_path)
 
     print(f"Model saved to {model_path}")

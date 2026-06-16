@@ -3,15 +3,13 @@ from __future__ import annotations
 import sys
 import os
 import json
-from typing import Optional, Any, Dict, List
-
-import numpy as np
-import pandas as pd
+from typing import Optional, Any, Dict
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing.config import RuntimeConfig, load_config, get_config
 from car_pricing.versioning import compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
@@ -22,21 +20,33 @@ from car_pricing.model_lineage import (
 class ModelService:
     _instance: Optional["ModelService"] = None
 
-    def __init__(self, model_dir: Optional[str] = None):
-        if model_dir is None:
-            model_dir = os.path.join(os.path.dirname(__file__), "..", "models")
+    def __init__(self, model_dir: Optional[str] = None, config: Optional[RuntimeConfig] = None):
+        if config is None:
+            if model_dir is not None:
+                config = load_config(model_dir=model_dir)
+            else:
+                config = get_config()
 
-        self._model_dir = os.path.abspath(model_dir)
-        self._model_path = os.path.join(self._model_dir, "sklearn_gbr.pkl")
-        self._metadata_path = os.path.join(self._model_dir, "model_metadata.json")
+        self._config: RuntimeConfig = config
+        self._model_dir = config.model_dir
+        self._model_path = config.model_path
+        self._metadata_path = config.model_metadata_path
 
         self._model: Optional[CarPriceModel] = None
         self._lineage: Optional[ModelLineage] = None
 
+    @property
+    def config(self) -> RuntimeConfig:
+        return self._config
+
     @classmethod
-    def get_instance(cls, model_dir: Optional[str] = None) -> "ModelService":
+    def get_instance(
+        cls,
+        model_dir: Optional[str] = None,
+        config: Optional[RuntimeConfig] = None,
+    ) -> "ModelService":
         if cls._instance is None:
-            cls._instance = cls(model_dir=model_dir)
+            cls._instance = cls(model_dir=model_dir, config=config)
         return cls._instance
 
     def load(self) -> None:
@@ -92,16 +102,6 @@ class ModelService:
         model = self.model
         predictions = model.predict_from_pydantic(data)
         return float(predictions[0])
-
-    def predict_batch(self, items: list) -> List[float]:
-        model = self.model
-        rows = [
-            {f: getattr(item, f) for f in model.feature_order}
-            for item in items
-        ]
-        df = pd.DataFrame(rows, columns=model.feature_order)
-        predictions = model.predict_dataframe(df)
-        return [float(v) for v in predictions]
 
     def get_schema(self) -> Dict[str, Any]:
         model = self.model

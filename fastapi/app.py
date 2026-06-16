@@ -13,7 +13,9 @@ import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
+from car_pricing.config import get_config
 
+CONFIG = get_config()
 
 app = FastAPI(
     title="Car Price Prediction API",
@@ -28,7 +30,7 @@ _model: CarPriceModel = None
 def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
+        model_path = CONFIG.model_path
         if not os.path.exists(model_path):
             raise RuntimeError(f"模型文件不存在: {model_path}")
         _model = CarPriceModel.from_joblib(model_path)
@@ -58,13 +60,23 @@ Note: add "/docs" to the URL to get the Swagger UI Docs or "/redoc"
     return note
 
 
-favicon_path = "favicon.png"
+favicon_path = os.path.join(os.path.dirname(__file__), "favicon.png")
 
 
 @app.get("/favicon.png", include_in_schema=False)
 async def favicon():
     from fastapi.responses import FileResponse
     return FileResponse(favicon_path)
+
+
+@app.get("/config", include_in_schema=False)
+async def show_config():
+    info = CONFIG.as_dict()
+    info.pop("model_path", None)
+    info.pop("model_metadata_path", None)
+    info.pop("model_status_path", None)
+    info.pop("data_csv_path", None)
+    return info
 
 
 @app.get("/schema")
@@ -92,3 +104,16 @@ def predict(data: CarPrediction):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    print(f"Starting API server on {CONFIG.bind_address}")
+    print(f"Model directory: {CONFIG.model_dir}")
+    uvicorn.run(
+        "app:app",
+        host=CONFIG.api_host,
+        port=CONFIG.api_port,
+        reload=True,
+    )
