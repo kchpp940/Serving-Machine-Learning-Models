@@ -17,6 +17,10 @@ from car_pricing.config import (
     load_config,
     get_config,
     reload_config,
+    EnvVarMeta,
+    export_env_schema,
+    env_schema_to_list,
+    validate_env_coverage,
 )
 
 from car_pricing.versioning import compute_file_hash, compute_data_version
@@ -38,6 +42,10 @@ __all__ = [
     "load_config",
     "get_config",
     "reload_config",
+    "EnvVarMeta",
+    "export_env_schema",
+    "env_schema_to_list",
+    "validate_env_coverage",
     "compute_file_hash",
     "compute_data_version",
     "ModelLineage",

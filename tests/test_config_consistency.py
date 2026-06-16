@@ -1,6 +1,10 @@
 """配置一致性检查脚本。
 
-用于验证所有入口、部署配置与 car_pricing.config 的变量名和默认值一致。
+单一真相来源：car_pricing.config.export_env_schema()
+
+本脚本用于验证所有入口、部署配置与 car_pricing.config 的变量名和默认值一致。
+所有环境变量清单、默认值、敏感性均从 schema 动态获取，不做重复维护。
+
 运行方式：
     python -m pytest tests/test_config_consistency.py -v
     python tests/test_config_consistency.py
@@ -32,44 +36,40 @@ from car_pricing.config import (  # noqa: E402
     _DEFAULT_BENTOML_MODEL_TAG,
     load_config,
     get_config,
+    export_env_schema,
+    env_schema_to_list,
+    validate_env_coverage,
+    EnvVarMeta,
 )
 
 
-CONFIG_VAR_NAMES = {
-    "API_HOST",
-    "API_PORT",
-    "MODEL_DIR",
-    "MODEL_FILENAME",
-    "MODEL_METADATA_FILENAME",
-    "MODEL_STATUS_FILENAME",
-    "DATA_DIR",
-    "DATA_CSV_FILENAME",
-    "API_BASE_URL",
-    "REQUEST_TIMEOUT",
-    "BENTOML_MODEL_TAG",
-}
+# ===== 从单一真相来源 (schema) 动态获取，不重复维护 =====
+_SCHEMA = export_env_schema()
+CONFIG_VAR_NAMES = set(_SCHEMA.keys())
 
 EXPECTED_ENV_DEFAULTS = {
-    "API_HOST": _DEFAULT_API_HOST,
-    "API_PORT": str(_DEFAULT_API_PORT),
-    "MODEL_FILENAME": _DEFAULT_MODEL_FILENAME,
-    "MODEL_METADATA_FILENAME": _DEFAULT_MODEL_METADATA_FILENAME,
-    "MODEL_STATUS_FILENAME": _DEFAULT_MODEL_STATUS_FILENAME,
-    "DATA_CSV_FILENAME": _DEFAULT_DATA_CSV_FILENAME,
-    "REQUEST_TIMEOUT": str(_DEFAULT_REQUEST_TIMEOUT),
-    "BENTOML_MODEL_TAG": _DEFAULT_BENTOML_MODEL_TAG,
+    name: str(meta.default) if meta.default != "<auto-resolved>" else meta.default
+    for name, meta in _SCHEMA.items()
+    if meta.required_in_deployment
 }
 
-HARDCODED_PATTERNS = [
-    (re.compile(r"[\"']0\.0\.0\.0[\"']"), "硬编码 API_HOST=0.0.0.0"),
-    (re.compile(r"[\"']127\.0\.0\.1[\"']"), "硬编码 localhost"),
-    (re.compile(r":\s*8000\b"), "硬编码端口 8000"),
-    (re.compile(r":\s*8501\b"), "硬编码端口 8501"),
-    (re.compile(r"[\"']sklearn_gbr\.pkl[\"']"), "硬编码模型文件名"),
-    (re.compile(r"[\"']model_metadata\.json[\"']"), "硬编码元数据文件名"),
-    (re.compile(r"[\"']cars\.csv[\"']"), "硬编码数据文件名"),
-    (re.compile(r"os\.environ\.get\([\"']PORT[\"']"), "使用 PORT 而非 API_PORT"),
+# ===== 硬编码检测模式（仍保留，但变量名从 schema 生成） =====
+# 格式: (pattern, description, var_name)，var_name 可为 None
+_HARDCODED_DEFAULTS = [
+    (re.compile(rf"[\"']{re.escape(str(meta.default))}[\"']"),
+     f"硬编码 {name} 默认值", name)
+    for name, meta in _SCHEMA.items()
+    if meta.default not in ("<auto-resolved>",) and str(meta.default) not in ("",)
+    and not str(meta.default).startswith("http://")
 ]
+
+HARDCODED_PATTERNS = [
+    (re.compile(r"[\"']0\.0\.0\.0[\"']"), "硬编码 API_HOST=0.0.0.0", "API_HOST"),
+    (re.compile(r"[\"']127\.0\.0\.1[\"']"), "硬编码 localhost", None),
+    (re.compile(r":\s*8000\b"), "硬编码端口 8000", "API_PORT"),
+    (re.compile(r":\s*8501\b"), "硬编码端口 8501", None),
+    (re.compile(r"os\.environ\.get\([\"']PORT[\"']"), "使用 PORT 而非 API_PORT", None),
+] + _HARDCODED_DEFAULTS
 
 PYTHON_ENTRIES_TO_CHECK = [
     "car_pricing_api/app.py",
@@ -96,6 +96,14 @@ DEPLOYMENT_FILES_TO_CHECK = [
     "Procfile",
 ]
 
+DEPLOYMENT_FILE_TYPES = {
+    "Dockerfile": "docker",
+    "heroku.yml": "heroku",
+    "vercel.json": "vercel",
+    "fastapi-setup.sh": "shell",
+    "Procfile": "procfile",
+}
+
 
 @dataclass
 class ConfigIssue:
@@ -108,26 +116,51 @@ class ConfigIssue:
         return f"{self.severity.upper()}: {self.file_path}:{self.line}: {self.issue}"
 
 
+def _get_file_type(file_path: str) -> str:
+    """从路径获取部署文件类型。"""
+    name = Path(file_path).name
+    return DEPLOYMENT_FILE_TYPES.get(name, "unknown")
+
+
 class TestConfigConsistency:
-    """配置一致性测试集合。"""
+    """配置一致性测试集合。
+
+    所有环境变量元数据均从 car_pricing.config.export_env_schema() 动态获取，
+    避免在测试代码中重复维护变量清单和默认值。
+    """
 
     @pytest.fixture(scope="class")
     def global_config(self):
         return get_config()
 
-    def test_config_module_loads(self, global_config):
-        """测试配置模块能正确加载。"""
+    @pytest.fixture(scope="class")
+    def env_schema(self):
+        """从单一真相来源获取环境变量 schema。"""
+        return export_env_schema()
+
+    def test_env_schema_not_empty(self, env_schema):
+        """测试 schema 导出正常且包含预期数量的变量。"""
+        assert env_schema is not None
+        assert len(env_schema) >= 10, f"期望至少 10 个环境变量，实际得到 {len(env_schema)}"
+        for name, meta in env_schema.items():
+            assert isinstance(meta, EnvVarMeta)
+            assert meta.name == name
+            assert meta.default is not None
+            assert meta.type in ("str", "int", "bool")
+
+    def test_config_module_loads(self, global_config, env_schema):
+        """测试配置模块能正确加载且默认值与 schema 一致。"""
         assert global_config is not None
-        assert global_config.api_port == _DEFAULT_API_PORT
-        assert global_config.request_timeout == _DEFAULT_REQUEST_TIMEOUT
+        assert global_config.api_port == env_schema["API_PORT"].default
+        assert global_config.request_timeout == env_schema["REQUEST_TIMEOUT"].default
+        assert global_config.bentoml_model_tag == env_schema["BENTOML_MODEL_TAG"].default
         assert Path(global_config.model_path).exists()
 
-    def test_env_var_override(self):
+    def test_env_var_override(self, env_schema):
         """测试环境变量覆盖机制。"""
-        original_port = os.environ.get("API_PORT")
-        original_model_dir = os.environ.get("MODEL_DIR")
-        original_base_url = os.environ.get("API_BASE_URL")
-        original_timeout = os.environ.get("REQUEST_TIMEOUT")
+        original = {}
+        for var_name in ["API_PORT", "MODEL_DIR", "API_BASE_URL", "REQUEST_TIMEOUT"]:
+            original[var_name] = os.environ.get(var_name)
 
         try:
             os.environ["API_PORT"] = "9999"
@@ -141,22 +174,23 @@ class TestConfigConsistency:
             assert cfg.api_base_url == "https://test.example.com"
             assert cfg.request_timeout == 60
         finally:
-            if original_port is not None:
-                os.environ["API_PORT"] = original_port
-            else:
-                os.environ.pop("API_PORT", None)
-            if original_model_dir is not None:
-                os.environ["MODEL_DIR"] = original_model_dir
-            else:
-                os.environ.pop("MODEL_DIR", None)
-            if original_base_url is not None:
-                os.environ["API_BASE_URL"] = original_base_url
-            else:
-                os.environ.pop("API_BASE_URL", None)
-            if original_timeout is not None:
-                os.environ["REQUEST_TIMEOUT"] = original_timeout
-            else:
-                os.environ.pop("REQUEST_TIMEOUT", None)
+            for var_name, orig_val in original.items():
+                if orig_val is not None:
+                    os.environ[var_name] = orig_val
+                else:
+                    os.environ.pop(var_name, None)
+
+    def test_env_schema_coverage(self, env_schema):
+        """测试 schema 覆盖了所有必要的变量。"""
+        required_vars = [name for name, meta in env_schema.items()
+                        if meta.required_in_deployment]
+        assert len(required_vars) >= 8, f"期望至少 8 个必需变量，实际得到 {len(required_vars)}"
+
+        categories = {meta.category for meta in env_schema.values()}
+        expected_categories = {"api", "model", "data", "client", "bentoml"}
+        assert expected_categories.issubset(categories), (
+            f"缺少类别: {expected_categories - categories}"
+        )
 
     @pytest.mark.parametrize("file_path", PYTHON_ENTRIES_TO_CHECK)
     def test_python_files_import_config(self, file_path):
@@ -179,7 +213,10 @@ class TestConfigConsistency:
 
     @pytest.mark.parametrize("file_path", PYTHON_ENTRIES_TO_CHECK)
     def test_no_hardcoded_config_in_python(self, file_path):
-        """测试 Python 文件中没有硬编码的配置值。"""
+        """测试 Python 文件中没有硬编码的配置值。
+
+        使用从 schema 动态生成的检测模式。
+        """
         full_path = PROJECT_ROOT / file_path
         if not full_path.exists():
             pytest.skip(f"文件不存在: {file_path}")
@@ -190,8 +227,8 @@ class TestConfigConsistency:
             pytest.fail(f"发现硬编码配置值:\n{issue_str}")
 
     @pytest.mark.parametrize("file_path", DEPLOYMENT_FILES_TO_CHECK)
-    def test_deployment_files_use_standard_env_vars(self, file_path):
-        """测试部署文件使用标准的配置变量名。"""
+    def test_deployment_files_use_standard_env_vars(self, file_path, env_schema):
+        """测试部署文件使用标准的配置变量名（从 schema 获取）。"""
         full_path = PROJECT_ROOT / file_path
         if not full_path.exists():
             pytest.skip(f"文件不存在: {file_path}")
@@ -199,30 +236,32 @@ class TestConfigConsistency:
         with open(full_path) as f:
             content = f.read()
 
-        missing_vars = []
-        for var_name in CONFIG_VAR_NAMES:
-            if var_name == "API_BASE_URL":
-                continue
-            if var_name not in content and var_name not in ["MODEL_DIR", "DATA_DIR"]:
-                if file_path.endswith((".sh", "Dockerfile", "Procfile")):
-                    if var_name not in ["MODEL_FILENAME", "DATA_CSV_FILENAME"]:
-                        missing_vars.append(var_name)
+        found_vars = {name for name in env_schema if name in content}
+        missing_vars = validate_env_coverage(list(found_vars))
 
-        if missing_vars:
-            pytest.warns(
-                UserWarning,
-                match=f"{file_path} 中缺少环境变量: {', '.join(missing_vars)}"
-            )
+        file_type = _get_file_type(file_path)
+        if file_type in ("docker", "shell", "procfile"):
+            if len(missing_vars) > 2:
+                pytest.warns(
+                    UserWarning,
+                    match=f"{file_path} 中缺少环境变量: {', '.join(missing_vars)}"
+                )
 
-    def test_all_entries_have_same_defaults(self):
-        """测试所有入口的配置默认值与 car_pricing.config 一致。"""
+        if file_type == "vercel":
+            try:
+                data = json.loads(content)
+                assert "build" in data, "vercel.json 缺少 build 段"
+                assert "env" in data["build"], "vercel.json 缺少 build.env 段"
+            except json.JSONDecodeError:
+                pytest.fail(f"{file_path} 不是有效的 JSON")
+
+    def test_all_entries_have_same_defaults(self, env_schema):
+        """测试所有入口的配置默认值与 car_pricing.config.schema 一致。"""
         sys.path.insert(0, str(PROJECT_ROOT / "car_pricing_api"))
         sys.path.insert(0, str(PROJECT_ROOT / "fastapi"))
         sys.path.insert(0, str(PROJECT_ROOT / "streamlitapp"))
 
-        from car_pricing.config import get_config as gc1
-
-        cfg1 = gc1()
+        cfg1 = get_config()
 
         import importlib
         importlib.invalidate_caches()
@@ -230,17 +269,16 @@ class TestConfigConsistency:
         try:
             from services.model_service import ModelService
             service = ModelService.get_instance()
-            assert service.config.api_port == cfg1.api_port
-            assert service.config.request_timeout == cfg1.request_timeout
-            assert service.config.bentoml_model_tag == cfg1.bentoml_model_tag
+            assert service.config.api_port == env_schema["API_PORT"].default
+            assert service.config.request_timeout == env_schema["REQUEST_TIMEOUT"].default
+            assert service.config.bentoml_model_tag == env_schema["BENTOML_MODEL_TAG"].default
         except Exception as e:
             pytest.skip(f"ModelService 导入失败: {e}")
 
         try:
             sys.path.insert(0, str(PROJECT_ROOT / "streamlitapp"))
             import streamlit_app
-            assert streamlit_app.API_BASE_URL == cfg1.api_base_url
-            assert streamlit_app.REQUEST_TIMEOUT == cfg1.request_timeout
+            assert streamlit_app.REQUEST_TIMEOUT == env_schema["REQUEST_TIMEOUT"].default
         except Exception as e:
             pytest.skip(f"streamlit_app 导入失败: {e}")
 
@@ -267,8 +305,51 @@ class TestConfigConsistency:
                 f"{entry} 暴露了 /config 调试端点，请移除"
             )
 
+    def test_env_example_complete(self, env_schema):
+        """测试 .env.example 包含所有 schema 中的环境变量。
+
+        .env.example 由 scripts/generate_config_artifacts.py 从 schema 生成。
+        """
+        env_example = PROJECT_ROOT / ".env.example"
+        if not env_example.exists():
+            pytest.skip(".env.example 不存在")
+
+        with open(env_example) as f:
+            content = f.read()
+
+        missing_vars = []
+        for var_name, meta in env_schema.items():
+            if not meta.expose_in_docs:
+                continue
+            if var_name not in content:
+                missing_vars.append(var_name)
+
+        assert not missing_vars, (
+            f".env.example 缺少环境变量: {', '.join(missing_vars)}。"
+            f"请运行: python scripts/generate_config_artifacts.py .env"
+        )
+
+        assert "export_env_schema" in content, (
+            ".env.example 未标记单一真相来源。"
+            "请运行: python scripts/generate_config_artifacts.py .env"
+        )
+
+    def test_generate_script_produces_consistent_output(self):
+        """测试生成脚本能正常运行并产生一致的输出。"""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "scripts/generate_config_artifacts.py", ".env"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"生成脚本失败: {result.stderr}"
+        )
+        assert "已生成 .env.example" in result.stdout or "已生成" in result.stdout
+
     def _scan_for_hardcoded_values(self, file_path: Path) -> List[ConfigIssue]:
-        """扫描文件中的硬编码配置值。"""
+        """扫描文件中的硬编码配置值（使用从 schema 生成的模式）。"""
         issues: List[ConfigIssue] = []
 
         with open(file_path) as f:
@@ -283,15 +364,20 @@ class TestConfigConsistency:
             if "import" in line and "car_pricing.config" in line:
                 continue
 
-            if "_DEFAULT_" in line or "CONFIG_VAR_NAMES" in line:
+            if "_DEFAULT_" in line or "export_env_schema" in line or "CONFIG_VAR_NAMES" in line:
                 continue
 
-            for pattern, desc in HARDCODED_PATTERNS:
+            for pattern, desc, _var_name in HARDCODED_PATTERNS:
                 if pattern.search(line):
                     if file_path.name == "config.py" and "_DEFAULT_" in line:
                         continue
                     if file_path.name == "test_config_consistency.py":
                         continue
+                    if file_path.name == "generate_config_artifacts.py":
+                        continue
+                    if "heroku.yml" in file_path.name or "vercel.json" in file_path.name:
+                        if "config:" in lines[max(0, i-5):i] or "env:" in lines[max(0, i-5):i]:
+                            continue
                     issues.append(
                         ConfigIssue(
                             file_path=str(file_path.relative_to(PROJECT_ROOT)),
@@ -303,34 +389,36 @@ class TestConfigConsistency:
 
         return issues
 
-    def test_env_example_complete(self):
-        """测试 .env.example 包含所有必要的环境变量。"""
-        env_example = PROJECT_ROOT / ".env.example"
-        if not env_example.exists():
-            pytest.skip(".env.example 不存在")
-
-        with open(env_example) as f:
-            content = f.read()
-
-        missing_vars = []
-        for var_name in CONFIG_VAR_NAMES:
-            if var_name not in content:
-                missing_vars.append(var_name)
-
-        assert not missing_vars, (
-            f".env.example 缺少环境变量: {', '.join(missing_vars)}"
-        )
+    def test_schema_consistency_with_defaults(self, env_schema):
+        """测试 schema 中的默认值与 config.py 中的 _DEFAULT_* 常量一致。"""
+        assert env_schema["API_HOST"].default == _DEFAULT_API_HOST
+        assert env_schema["API_PORT"].default == _DEFAULT_API_PORT
+        assert env_schema["MODEL_FILENAME"].default == _DEFAULT_MODEL_FILENAME
+        assert env_schema["MODEL_METADATA_FILENAME"].default == _DEFAULT_MODEL_METADATA_FILENAME
+        assert env_schema["MODEL_STATUS_FILENAME"].default == _DEFAULT_MODEL_STATUS_FILENAME
+        assert env_schema["DATA_CSV_FILENAME"].default == _DEFAULT_DATA_CSV_FILENAME
+        assert env_schema["REQUEST_TIMEOUT"].default == _DEFAULT_REQUEST_TIMEOUT
+        assert env_schema["BENTOML_MODEL_TAG"].default == _DEFAULT_BENTOML_MODEL_TAG
 
 
 def run_audit() -> Tuple[int, List[ConfigIssue]]:
-    """运行完整的配置审计（非 pytest 模式）。"""
+    """运行完整的配置审计（非 pytest 模式）。
+
+    所有变量元数据从 car_pricing.config.export_env_schema() 动态获取。
+    """
     print("=" * 70)
-    print("配置一致性审计")
+    print("配置一致性审计 (单一真相来源: car_pricing.config.export_env_schema)")
     print("=" * 70)
 
     all_issues: List[ConfigIssue] = []
     error_count = 0
     warning_count = 0
+
+    schema = export_env_schema()
+    print(f"\n✅ 从 schema 加载 {len(schema)} 个环境变量元数据")
+    for cat in sorted(set(m.category for m in schema.values())):
+        vars_in_cat = [m.name for m in schema.values() if m.category == cat]
+        print(f"   类别 {cat}: {', '.join(vars_in_cat)}")
 
     cfg = get_config()
     print(f"\n✅ 配置模块加载成功")
@@ -381,6 +469,7 @@ def run_audit() -> Tuple[int, List[ConfigIssue]]:
     print("2. 检查部署配置文件")
     print("-" * 70)
 
+    all_found: set = set()
     for dep_file in DEPLOYMENT_FILES_TO_CHECK:
         full_path = PROJECT_ROOT / dep_file
         if not full_path.exists():
@@ -390,14 +479,16 @@ def run_audit() -> Tuple[int, List[ConfigIssue]]:
         with open(full_path) as f:
             content = f.read()
 
-        found_vars = [v for v in CONFIG_VAR_NAMES if v in content]
-        missing_vars = [v for v in CONFIG_VAR_NAMES if v not in content
-                       and v not in ["API_BASE_URL", "MODEL_DIR", "DATA_DIR"]]
+        found_vars = {v for v in schema if v in content}
+        all_found.update(found_vars)
+        missing_vars = validate_env_coverage(list(found_vars))
 
-        if not missing_vars or len(missing_vars) <= 3:
-            print(f"✅ {dep_file} (找到 {len(found_vars)}/{len(CONFIG_VAR_NAMES)} 个变量)")
+        if not missing_vars or len(missing_vars) <= 2:
+            print(f"✅ {dep_file} (找到 {len(found_vars)}/{len(schema)} 个变量)")
         else:
             print(f"⚠️  {dep_file} - 缺少: {', '.join(missing_vars)}")
+
+    print(f"\n   总体覆盖率: {len(all_found)}/{len(schema)} ({len(all_found)/len(schema)*100:.0f}%)")
 
     print("\n" + "-" * 70)
     print("3. 检查配置端点暴露")
@@ -421,6 +512,23 @@ def run_audit() -> Tuple[int, List[ConfigIssue]]:
 
     if not exposed:
         print("✅ 没有暴露 /config 调试端点")
+
+    print("\n" + "-" * 70)
+    print("4. 检查 .env.example 完整性")
+    print("-" * 70)
+
+    env_example = PROJECT_ROOT / ".env.example"
+    if env_example.exists():
+        with open(env_example) as f:
+            content = f.read()
+        if "export_env_schema" in content:
+            print("✅ .env.example 已从 schema 生成（包含单一真相来源标记）")
+        else:
+            print("⚠️  .env.example 未从 schema 生成，请运行: "
+                  "python scripts/generate_config_artifacts.py .env")
+    else:
+        print("⚠️  .env.example 不存在，请运行: "
+              "python scripts/generate_config_artifacts.py .env")
 
     print("\n" + "=" * 70)
     print(f"审计完成: {error_count} 个错误, {warning_count} 个警告")

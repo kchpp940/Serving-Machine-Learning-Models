@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Any
 
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -189,9 +189,160 @@ def reload_config() -> RuntimeConfig:
     return _CONFIG
 
 
+@dataclass
+class EnvVarMeta:
+    """环境变量元数据。"""
+    name: str
+    default: Any
+    type: str
+    description: str
+    sensitive: bool = False
+    expose_in_docs: bool = True
+    required_in_deployment: bool = True
+    category: str = "general"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "default": self.default,
+            "type": self.type,
+            "description": self.description,
+            "sensitive": self.sensitive,
+            "expose_in_docs": self.expose_in_docs,
+            "required_in_deployment": self.required_in_deployment,
+            "category": self.category,
+        }
+
+
+def export_env_schema() -> Dict[str, EnvVarMeta]:
+    """导出完整的环境变量 schema（单一真相来源）。
+
+    所有配置文件、.env.example、测试脚本、部署文档均应从此 schema 生成，
+    避免在多处维护重复的变量清单和默认值。
+    """
+    schema: Dict[str, EnvVarMeta] = {}
+
+    _add = lambda meta: schema.update({meta.name: meta})
+
+    _add(EnvVarMeta(
+        name="API_HOST",
+        default=_DEFAULT_API_HOST,
+        type="str",
+        description="API 监听地址",
+        category="api",
+    ))
+
+    _add(EnvVarMeta(
+        name="API_PORT",
+        default=_DEFAULT_API_PORT,
+        type="int",
+        description="API 监听端口（Heroku 会自动注入 PORT 环境变量，启动时会映射到此变量）",
+        category="api",
+    ))
+
+    _add(EnvVarMeta(
+        name="MODEL_DIR",
+        default="<auto-resolved>",
+        type="str",
+        description="模型文件目录。未设置时按优先级解析：./models → ./shared_models → <project_root>/shared_models → <project_root>/models",
+        category="model",
+    ))
+
+    _add(EnvVarMeta(
+        name="MODEL_FILENAME",
+        default=_DEFAULT_MODEL_FILENAME,
+        type="str",
+        description="模型文件名",
+        category="model",
+    ))
+
+    _add(EnvVarMeta(
+        name="MODEL_METADATA_FILENAME",
+        default=_DEFAULT_MODEL_METADATA_FILENAME,
+        type="str",
+        description="模型元数据文件名",
+        category="model",
+    ))
+
+    _add(EnvVarMeta(
+        name="MODEL_STATUS_FILENAME",
+        default=_DEFAULT_MODEL_STATUS_FILENAME,
+        type="str",
+        description="模型状态文件名",
+        category="model",
+    ))
+
+    _add(EnvVarMeta(
+        name="DATA_DIR",
+        default="<auto-resolved>",
+        type="str",
+        description="训练数据目录。未设置时按优先级解析：./Data → <project_root>/Data",
+        category="data",
+    ))
+
+    _add(EnvVarMeta(
+        name="DATA_CSV_FILENAME",
+        default=_DEFAULT_DATA_CSV_FILENAME,
+        type="str",
+        description="训练数据 CSV 文件名",
+        category="data",
+    ))
+
+    _add(EnvVarMeta(
+        name="API_BASE_URL",
+        default=f"http://localhost:{_DEFAULT_API_PORT}",
+        type="str",
+        description="API 基础 URL（供 Streamlit 等客户端调用）",
+        category="client",
+    ))
+
+    _add(EnvVarMeta(
+        name="REQUEST_TIMEOUT",
+        default=_DEFAULT_REQUEST_TIMEOUT,
+        type="int",
+        description="请求超时时间（秒）",
+        category="client",
+    ))
+
+    _add(EnvVarMeta(
+        name="BENTOML_MODEL_TAG",
+        default=_DEFAULT_BENTOML_MODEL_TAG,
+        type="str",
+        description="BentoML 模型标签",
+        category="bentoml",
+    ))
+
+    return schema
+
+
+def env_schema_to_list() -> List[EnvVarMeta]:
+    """将 schema 转换为按 category 排序的列表。"""
+    schema = export_env_schema()
+    categories = ["api", "model", "data", "client", "bentoml", "general"]
+    return sorted(
+        schema.values(),
+        key=lambda m: (categories.index(m.category) if m.category in categories else 99, m.name)
+    )
+
+
+def validate_env_coverage(env_vars: List[str]) -> List[str]:
+    """校验给定的环境变量列表是否覆盖了所有 required_in_deployment 的变量。
+
+    返回缺失的变量名列表。
+    """
+    schema = export_env_schema()
+    required = {name for name, meta in schema.items() if meta.required_in_deployment}
+    provided = set(env_vars)
+    return sorted(required - provided)
+
+
 __all__ = [
     "RuntimeConfig",
     "load_config",
     "get_config",
     "reload_config",
+    "EnvVarMeta",
+    "export_env_schema",
+    "env_schema_to_list",
+    "validate_env_coverage",
 ]
