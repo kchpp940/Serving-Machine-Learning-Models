@@ -1,0 +1,19 @@
+{
+  "status": "healthy",
+  "model": {
+    "name": "sklearn_gbr",
+    "type": "GradientBoostingRegressor",
+    "run_id": ""
+  },
+  "lineage": {
+    "experiment_id": "",
+    "schema_version": "d300535317df3292",
+    "data_version": "2d180da826cd",
+    "model_artifact_hash": "6bed18503ce89a6356c7aa8c371e4440b36ce19c5fde7e1dcc2fa45b3ecafa63"
+  },
+  "metrics": {
+    "r2_score": 0.9052828747635235,
+    "mse": 7062869.094365279,
+    "mae": 1817.6005477032793
+  }
+}

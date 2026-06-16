@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "car-pricing"
+version = "0.1.0"
+description = "Car Price Prediction Model and API"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pandas",
+    "scikit-learn",
+    "joblib",
+    "numpy",
+]
+
+[tool.setuptools.packages.find]
+include = ["car_pricing*"]

@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import sys
 import os
 import json
 from typing import Optional, Any, Dict
 
-sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.versioning import compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
     build_fastapi_status,
+    compute_file_hash,
 )
 
 

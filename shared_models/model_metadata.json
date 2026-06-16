@@ -1,0 +1,150 @@
+{
+  "run_id": "",
+  "experiment_id": "",
+  "model_name": "sklearn_gbr",
+  "model_type": "GradientBoostingRegressor",
+  "schema_version": "d300535317df3292",
+  "data_version": "2d180da826cd",
+  "model_artifact_hash": "6bed18503ce89a6356c7aa8c371e4440b36ce19c5fde7e1dcc2fa45b3ecafa63",
+  "metrics": {
+    "r2_score": 0.9052828747635235,
+    "mse": 7062869.094365279,
+    "mae": 1817.6005477032793
+  },
+  "params": {
+    "model_name": "sklearn_gbr",
+    "model_type": "GradientBoostingRegressor",
+    "n_features": 10
+  },
+  "tags": {},
+  "schema": {
+    "feature_order": [
+      "enginesize",
+      "curbweight",
+      "horsepower",
+      "highwaympg",
+      "carwidth",
+      "wheelbase",
+      "drivewheel",
+      "citympg",
+      "boreratio",
+      "cylindernumber"
+    ],
+    "numeric_features": [
+      "enginesize",
+      "curbweight",
+      "horsepower",
+      "highwaympg",
+      "carwidth",
+      "wheelbase",
+      "citympg",
+      "boreratio"
+    ],
+    "categorical_features": [
+      "drivewheel",
+      "cylindernumber"
+    ],
+    "target_column": "price",
+    "display_names": {
+      "enginesize": "Engine Size",
+      "curbweight": "Curb Weight",
+      "horsepower": "Horsepower",
+      "highwaympg": "Highway Miles Per Gallon",
+      "carwidth": "Car Width",
+      "wheelbase": "Wheel Base",
+      "drivewheel": "Drive Wheel",
+      "citympg": "City Miles Per Gallon",
+      "boreratio": "Bore Ratio",
+      "cylindernumber": "Number of Cylinders"
+    },
+    "default_values": {
+      "enginesize": 130.0,
+      "curbweight": 2548.0,
+      "horsepower": 111.0,
+      "highwaympg": 27.0,
+      "carwidth": 64.1,
+      "wheelbase": 88.6,
+      "drivewheel": "fwd",
+      "citympg": 21.0,
+      "boreratio": 3.47,
+      "cylindernumber": "four"
+    },
+    "schema_version": "d300535317df3292",
+    "categorical_encoders": {
+      "drivewheel": {
+        "classes": [
+          "4wd",
+          "fwd",
+          "rwd"
+        ]
+      },
+      "cylindernumber": {
+        "classes": [
+          "eight",
+          "five",
+          "four",
+          "six",
+          "three",
+          "twelve",
+          "two"
+        ]
+      }
+    },
+    "categorical_options": {
+      "drivewheel": [
+        {
+          "display": "Four Wheel Drive (4WD)",
+          "form_value": "4wd",
+          "model_code": 0
+        },
+        {
+          "display": "Front Wheel Drive (FWD)",
+          "form_value": "fwd",
+          "model_code": 1
+        },
+        {
+          "display": "Rear Wheel Drive (RWD)",
+          "form_value": "rwd",
+          "model_code": 2
+        }
+      ],
+      "cylindernumber": [
+        {
+          "display": "8 cylinders",
+          "form_value": "eight",
+          "model_code": 0
+        },
+        {
+          "display": "5 cylinders",
+          "form_value": "five",
+          "model_code": 1
+        },
+        {
+          "display": "4 cylinders",
+          "form_value": "four",
+          "model_code": 2
+        },
+        {
+          "display": "6 cylinders",
+          "form_value": "six",
+          "model_code": 3
+        },
+        {
+          "display": "3 cylinders",
+          "form_value": "three",
+          "model_code": 4
+        },
+        {
+          "display": "12 cylinders",
+          "form_value": "twelve",
+          "model_code": 5
+        },
+        {
+          "display": "2 cylinders",
+          "form_value": "two",
+          "model_code": 6
+        }
+      ]
+    }
+  }
+}

@@ -1,8 +1,5 @@
-import sys
 import os
 import json
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
@@ -15,10 +12,11 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
-from car_pricing.versioning import compute_data_version, compute_file_hash
 from car_pricing.model_lineage import (
     ModelLineage,
     build_fastapi_status,
+    compute_data_version,
+    compute_file_hash,
 )
 
 

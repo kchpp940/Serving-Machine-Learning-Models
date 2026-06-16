@@ -1,7 +1,4 @@
-import sys
-import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +18,7 @@ class CarPrediction(BaseModel):
     cylindernumber: str
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "enginesize": 130,
                 "curbweight": 2548,
@@ -42,7 +39,7 @@ class PredictionResponse(BaseModel):
     status: str = "ok"
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "prediction": 13295.27,
                 "status": "ok",
