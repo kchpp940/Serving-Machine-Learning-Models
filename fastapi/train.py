@@ -14,10 +14,14 @@ from car_pricing.feature_schema import (
     bundle_model,
 )
 from car_pricing.artifact_paths import ArtifactPaths
+from car_pricing.config import RuntimeConfig
 
 
 def main():
-    paths = ArtifactPaths.for_fastapi_train(__file__)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config = RuntimeConfig.default(base_dir=script_dir)
+    paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
+
     paths.assert_training_data_file_exists()
     paths.ensure_model_dir()
 

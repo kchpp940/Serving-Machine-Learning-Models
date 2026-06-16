@@ -1,19 +1,12 @@
 {
-  "status": "healthy",
-  "model": {
-    "name": "sklearn_gbr",
-    "type": "GradientBoostingRegressor",
-    "run_id": ""
-  },
-  "lineage": {
-    "experiment_id": "",
-    "schema_version": "d300535317df3292",
-    "data_version": "2d180da826cd",
-    "model_artifact_hash": "82bfa3baac2b367f8d9e14e47abc1e76e66fdb98056a53220caea052fdf0e972"
-  },
+  "status": "ready",
+  "model_name": "test_model",
+  "model_type": "TestType",
+  "schema_version": "abc123",
+  "data_version": "def456",
+  "model_artifact_hash": "ghi789",
   "metrics": {
-    "r2_score": 0.9075458791839368,
-    "mse": 6894121.321019709,
-    "mae": 1793.5344013872273
-  }
+    "r2": 0.95
+  },
+  "loaded_at": "2026-06-16T13:31:06.889689"
 }

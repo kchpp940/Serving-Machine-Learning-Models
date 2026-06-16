@@ -23,18 +23,12 @@ from car_pricing.model_lineage import (
     build_fastapi_status,
 )
 
-from car_pricing.artifact_paths import (
-    ArtifactPaths,
-    MODEL_FILENAME,
-    METADATA_FILENAME,
-    STATUS_FILENAME,
-    SCHEMA_SNAPSHOT_FILENAME,
-    LINEAGE_FILENAME,
-    DEFAULT_MODEL_DIRNAME,
-    DEFAULT_DATA_DIRNAME,
-    DEFAULT_DATA_FILENAME,
-    BENTOML_MODEL_TAG,
+from car_pricing.config import (
+    RuntimeConfig,
+    export_env_schema,
 )
+
+from car_pricing.artifact_paths import ArtifactPaths
 
 __all__ = [
     "FeatureSchema",
@@ -52,14 +46,7 @@ __all__ = [
     "compute_content_hash",
     "ModelLineage",
     "build_fastapi_status",
+    "RuntimeConfig",
+    "export_env_schema",
     "ArtifactPaths",
-    "MODEL_FILENAME",
-    "METADATA_FILENAME",
-    "STATUS_FILENAME",
-    "SCHEMA_SNAPSHOT_FILENAME",
-    "LINEAGE_FILENAME",
-    "DEFAULT_MODEL_DIRNAME",
-    "DEFAULT_DATA_DIRNAME",
-    "DEFAULT_DATA_FILENAME",
-    "BENTOML_MODEL_TAG",
 ]

@@ -1,6 +1,5 @@
 import sys
 import os
-import json
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -16,15 +15,16 @@ from car_pricing.feature_schema import (
     bundle_model,
 )
 from car_pricing.versioning import compute_data_version, compute_file_hash
-from car_pricing.model_lineage import (
-    ModelLineage,
-    build_fastapi_status,
-)
+from car_pricing.model_lineage import ModelLineage
 from car_pricing.artifact_paths import ArtifactPaths
+from car_pricing.config import RuntimeConfig
 
 
 def main():
-    paths = ArtifactPaths.for_car_pricing_api_train(__file__)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config = RuntimeConfig.default(base_dir=script_dir)
+    paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
+
     paths.assert_training_data_file_exists()
     paths.ensure_model_dir()
 
@@ -74,11 +74,7 @@ def main():
         schema=schema,
     )
 
-    with open(paths.metadata_file, "w", encoding="utf-8") as f:
-        json.dump(lineage.to_dict(), f, indent=2, ensure_ascii=False)
-
-    with open(paths.status_file, "w", encoding="utf-8") as f:
-        json.dump(build_fastapi_status(lineage), f, indent=2, ensure_ascii=False)
+    written = lineage.persist(paths)
 
     print(f"Model saved to {paths.model_file}")
     print(f"Model name: {model_name}")
@@ -90,8 +86,8 @@ def main():
     print(f"Data version: {data_version}")
     print(f"Model artifact hash: {model_artifact_hash}")
     print(f"Metrics: {metrics}")
-    print(f"Metadata saved to {paths.metadata_file}")
-    print(f"Status saved to {paths.status_file}")
+    for key, path in written.items():
+        print(f"{key.capitalize()} saved to {path}")
 
 
 if __name__ == "__main__":

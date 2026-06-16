@@ -12,16 +12,18 @@ import pandas as pd
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing.artifact_paths import BENTOML_MODEL_TAG
+from car_pricing.config import RuntimeConfig
 
+_config = RuntimeConfig.from_env()
+_bentoml_tag = _config.bentoml_model_tag
 
-predictor = bentoml.sklearn.load_runner(f"{BENTOML_MODEL_TAG}:latest")
+predictor = bentoml.sklearn.load_runner(_bentoml_tag)
 
-service = bentoml.Service(BENTOML_MODEL_TAG, runners=[predictor])
+service = bentoml.Service(_bentoml_tag.split(":")[0], runners=[predictor])
 
 
 def _get_schema():
-    raw_bundle = bentoml.sklearn.load_model(f"{BENTOML_MODEL_TAG}:latest")
+    raw_bundle = bentoml.sklearn.load_model(_bentoml_tag)
     model = CarPriceModel.from_sklearn_object(raw_bundle)
     return model
 

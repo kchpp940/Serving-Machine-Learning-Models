@@ -1,0 +1,54 @@
+{
+  "feature_order": [
+    "enginesize",
+    "curbweight",
+    "horsepower",
+    "highwaympg",
+    "carwidth",
+    "wheelbase",
+    "drivewheel",
+    "citympg",
+    "boreratio",
+    "cylindernumber"
+  ],
+  "numeric_features": [
+    "enginesize",
+    "curbweight",
+    "horsepower",
+    "highwaympg",
+    "carwidth",
+    "wheelbase",
+    "citympg",
+    "boreratio"
+  ],
+  "categorical_features": [
+    "drivewheel",
+    "cylindernumber"
+  ],
+  "target_column": "price",
+  "display_names": {
+    "enginesize": "Engine Size",
+    "curbweight": "Curb Weight",
+    "horsepower": "Horsepower",
+    "highwaympg": "Highway Miles Per Gallon",
+    "carwidth": "Car Width",
+    "wheelbase": "Wheel Base",
+    "drivewheel": "Drive Wheel",
+    "citympg": "City Miles Per Gallon",
+    "boreratio": "Bore Ratio",
+    "cylindernumber": "Number of Cylinders"
+  },
+  "default_values": {
+    "enginesize": 130.0,
+    "curbweight": 2548.0,
+    "horsepower": 111.0,
+    "highwaympg": 27.0,
+    "carwidth": 64.1,
+    "wheelbase": 88.6,
+    "drivewheel": "fwd",
+    "citympg": 21.0,
+    "boreratio": 3.47,
+    "cylindernumber": "four"
+  },
+  "schema_version": "64fdf40e2e2b0a6c"
+}

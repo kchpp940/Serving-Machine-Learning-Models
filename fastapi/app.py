@@ -14,6 +14,7 @@ import numpy as np
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 from car_pricing.artifact_paths import ArtifactPaths
+from car_pricing.config import RuntimeConfig
 
 
 app = FastAPI(
@@ -30,7 +31,9 @@ _paths: ArtifactPaths = None
 def get_paths() -> ArtifactPaths:
     global _paths
     if _paths is None:
-        _paths = ArtifactPaths.for_fastapi_app(__file__)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config = RuntimeConfig.from_env(base_dir=script_dir)
+        _paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
     return _paths
 
 

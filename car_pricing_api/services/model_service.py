@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import os
-import json
 from typing import Optional, Any, Dict
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -15,14 +14,17 @@ from car_pricing.model_lineage import (
     build_fastapi_status,
 )
 from car_pricing.artifact_paths import ArtifactPaths
+from car_pricing.config import RuntimeConfig
 
 
 class ModelService:
     _instance: Optional["ModelService"] = None
 
     def __init__(self, model_dir: Optional[str] = None):
+        api_dir = os.path.dirname(os.path.abspath(__file__))
         if model_dir is None:
-            self._paths = ArtifactPaths.for_car_pricing_api_service(__file__)
+            config = RuntimeConfig.default(base_dir=api_dir)
+            self._paths = ArtifactPaths.from_config(config=config, base_dir=api_dir)
         else:
             self._paths = ArtifactPaths.from_dir(model_dir)
 
@@ -55,22 +57,13 @@ class ModelService:
         if self._lineage is None:
             model = self.model
 
-            if self._paths.metadata_file_exists():
-                with open(self._paths.metadata_file, "r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-                self._lineage = ModelLineage(
-                    run_id=metadata.get("run_id", ""),
-                    experiment_id=metadata.get("experiment_id", ""),
-                    model_name=metadata.get("model_name", "sklearn_gbr"),
-                    model_type=metadata.get("model_type", ""),
-                    schema_version=metadata.get("schema_version", model.schema.schema_version()),
-                    data_version=metadata.get("data_version", ""),
-                    model_artifact_hash=metadata.get("model_artifact_hash", compute_file_hash(self._paths.model_file)),
-                    metrics=dict(metadata.get("metrics", {})),
-                    params=dict(metadata.get("params", {})),
-                    parent_run_id=metadata.get("parent_run_id"),
-                    schema=model.schema,
-                )
+            loaded = ModelLineage.load_from_paths(self._paths)
+            if loaded is not None:
+                if loaded.schema is None:
+                    loaded.schema = model.schema
+                if not loaded.model_artifact_hash:
+                    loaded.model_artifact_hash = compute_file_hash(self._paths.model_file)
+                self._lineage = loaded
             else:
                 model_artifact_hash = compute_file_hash(self._paths.model_file)
                 self._lineage = ModelLineage(

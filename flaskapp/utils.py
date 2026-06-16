@@ -9,6 +9,7 @@ import numpy as np
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 from car_pricing.artifact_paths import ArtifactPaths
+from car_pricing.config import RuntimeConfig
 
 
 _model = None
@@ -18,17 +19,12 @@ _model_path: str = None
 def _get_model():
     global _model, _model_path
     if _model is None:
-        paths = ArtifactPaths.for_flaskapp(__file__)
-        shared_models_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "shared_models"
-        )
-        resolved_path = paths.find_existing_model_file(fallback_dirs=[shared_models_dir])
-        if resolved_path is None:
-            raise FileNotFoundError(
-                f"模型文件不存在，已查找: {paths.model_file}, {os.path.join(shared_models_dir, paths.model_filename)}"
-            )
-        _model_path = resolved_path
-        _model = CarPriceModel.from_joblib(resolved_path)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config = RuntimeConfig.from_env(base_dir=script_dir)
+        paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
+        paths.assert_model_file_exists()
+        _model_path = paths.model_file
+        _model = CarPriceModel.from_joblib(paths.model_file)
         _model.schema.validate()
     return _model
 

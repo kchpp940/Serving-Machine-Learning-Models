@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from car_pricing.feature_schema import FeatureSchema
+
+if TYPE_CHECKING:
+    from car_pricing.artifact_paths import ArtifactPaths
 
 
 @dataclass
@@ -78,6 +82,60 @@ class ModelLineage:
             "parent_run_id": self.parent_run_id,
             "created_at": self.created_at,
         }
+
+    @classmethod
+    def load(cls, path: str) -> "ModelLineage":
+        with open(path, "r", encoding="utf-8") as f:
+            return cls.from_dict(json.load(f))
+
+    @classmethod
+    def load_from_paths(cls, paths: "ArtifactPaths") -> Optional["ModelLineage"]:
+        if paths.metadata_file_exists():
+            return cls.load(paths.metadata_file)
+        if paths.lineage_file_exists():
+            return cls.load(paths.lineage_file)
+        return None
+
+    def save_metadata(self, paths: "ArtifactPaths") -> str:
+        paths.ensure_model_dir()
+        with open(paths.metadata_file, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        return paths.metadata_file
+
+    def save_status(self, paths: "ArtifactPaths") -> str:
+        paths.ensure_model_dir()
+        status = build_fastapi_status(self)
+        with open(paths.status_file, "w", encoding="utf-8") as f:
+            json.dump(status, f, indent=2, ensure_ascii=False)
+        return paths.status_file
+
+    def save_schema_snapshot(self, paths: "ArtifactPaths") -> Optional[str]:
+        if self.schema is None:
+            return None
+        paths.ensure_model_dir()
+        try:
+            schema_dict = self.schema.to_dict()
+        except Exception:
+            schema_dict = self.schema.to_dict(include_encoders=False)
+        with open(paths.schema_snapshot_file, "w", encoding="utf-8") as f:
+            json.dump(schema_dict, f, indent=2, ensure_ascii=False)
+        return paths.schema_snapshot_file
+
+    def save_lineage(self, paths: "ArtifactPaths") -> str:
+        paths.ensure_model_dir()
+        with open(paths.lineage_file, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+        return paths.lineage_file
+
+    def persist(self, paths: "ArtifactPaths") -> Dict[str, str]:
+        written: Dict[str, str] = {}
+        written["metadata"] = self.save_metadata(paths)
+        written["status"] = self.save_status(paths)
+        written["lineage"] = self.save_lineage(paths)
+        schema_path = self.save_schema_snapshot(paths)
+        if schema_path is not None:
+            written["schema_snapshot"] = schema_path
+        return written
 
 
 def build_fastapi_status(lineage: ModelLineage) -> Dict[str, Any]:
