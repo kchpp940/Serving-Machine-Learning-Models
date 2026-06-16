@@ -1,3 +1,22 @@
 build:
   docker:
     web: Dockerfile
+  config:
+    # === 统一运行时配置 (与 car_pricing/config.py 变量名完全对齐) ===
+    API_HOST: "0.0.0.0"
+    API_PORT: "8000"
+    MODEL_DIR: "/app/shared_models"
+    MODEL_FILENAME: "sklearn_gbr.pkl"
+    MODEL_METADATA_FILENAME: "model_metadata.json"
+    MODEL_STATUS_FILENAME: "model_status.json"
+    DATA_DIR: "/app/Data"
+    DATA_CSV_FILENAME: "cars.csv"
+    REQUEST_TIMEOUT: "10"
+    BENTOML_MODEL_TAG: "gbr:latest"
+
+run:
+  web: >
+    export API_PORT=${PORT:-${API_PORT}} &&
+    export API_BASE_URL="http://localhost:${API_PORT}" &&
+    gunicorn -w 3 -k uvicorn.workers.UvicornWorker app:app
+    --bind ${API_HOST}:${API_PORT}

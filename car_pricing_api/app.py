@@ -67,16 +67,6 @@ app.include_router(schema_router)
 app.include_router(prediction_router)
 
 
-@app.get("/config", include_in_schema=False)
-async def show_config():
-    info = CONFIG.as_dict()
-    info.pop("model_path", None)
-    info.pop("model_metadata_path", None)
-    info.pop("model_status_path", None)
-    info.pop("data_csv_path", None)
-    return info
-
-
 if __name__ == "__main__":
     import uvicorn
 

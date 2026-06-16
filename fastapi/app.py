@@ -69,16 +69,6 @@ async def favicon():
     return FileResponse(favicon_path)
 
 
-@app.get("/config", include_in_schema=False)
-async def show_config():
-    info = CONFIG.as_dict()
-    info.pop("model_path", None)
-    info.pop("model_metadata_path", None)
-    info.pop("model_status_path", None)
-    info.pop("data_csv_path", None)
-    return info
-
-
 @app.get("/schema")
 async def get_schema():
     model = get_model()
