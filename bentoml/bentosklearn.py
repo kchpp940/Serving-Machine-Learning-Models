@@ -13,17 +13,11 @@ from car_pricing.feature_schema import (
     prepare_training_data,
     bundle_model,
 )
-from car_pricing.artifact_paths import ArtifactPaths
-from car_pricing.config import RuntimeConfig
 
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config = RuntimeConfig.default(base_dir=script_dir)
-    paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
-    paths.assert_training_data_file_exists()
-
-    df = load_training_data(paths.training_data_file)
+    csv_path = os.path.join(os.path.dirname(__file__), "Data", "cars.csv")
+    df = load_training_data(csv_path)
 
     X, y, schema = prepare_training_data(df)
 
@@ -36,9 +30,9 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    bentoml.sklearn.save(config.bentoml_model_tag.split(":")[0], bundle)
+    bentoml.sklearn.save("gbr", bundle)
 
-    print(f"Model saved to BentoML with tag: {config.bentoml_model_tag}")
+    print(f"Model saved to BentoML")
     print(f"Feature order: {schema.feature_order}")
     print(f"Number of features: {schema.n_features()}")
     print(f"Model n_features_in_: {model.n_features_in_}")

@@ -13,8 +13,6 @@ import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing.artifact_paths import ArtifactPaths
-from car_pricing.config import RuntimeConfig
 
 
 app = FastAPI(
@@ -25,24 +23,15 @@ app = FastAPI(
 )
 
 _model: CarPriceModel = None
-_paths: ArtifactPaths = None
-
-
-def get_paths() -> ArtifactPaths:
-    global _paths
-    if _paths is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config = RuntimeConfig.from_env(base_dir=script_dir)
-        _paths = ArtifactPaths.from_config(config=config, base_dir=script_dir)
-    return _paths
 
 
 def get_model() -> CarPriceModel:
     global _model
     if _model is None:
-        paths = get_paths()
-        paths.assert_model_file_exists()
-        _model = CarPriceModel.from_joblib(paths.model_file)
+        model_path = os.path.join(os.path.dirname(__file__), "models", "sklearn_gbr.pkl")
+        if not os.path.exists(model_path):
+            raise RuntimeError(f"模型文件不存在: {model_path}")
+        _model = CarPriceModel.from_joblib(model_path)
         _model.schema.validate()
     return _model
 
