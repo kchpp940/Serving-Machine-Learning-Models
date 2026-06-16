@@ -6,18 +6,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# === 统一运行时配置 (与 car_pricing/config.py 变量名完全对齐) ===
-export API_HOST="${API_HOST:-0.0.0.0}"
-export API_PORT="${API_PORT:-8000}"
-export MODEL_DIR="${MODEL_DIR:-$PROJECT_ROOT/shared_models}"
-export MODEL_FILENAME="${MODEL_FILENAME:-sklearn_gbr.pkl}"
-export MODEL_METADATA_FILENAME="${MODEL_METADATA_FILENAME:-model_metadata.json}"
-export MODEL_STATUS_FILENAME="${MODEL_STATUS_FILENAME:-model_status.json}"
-export DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/Data}"
-export DATA_CSV_FILENAME="${DATA_CSV_FILENAME:-cars.csv}"
-export API_BASE_URL="${API_BASE_URL:-http://localhost:$API_PORT}"
-export REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-10}"
-export BENTOML_MODEL_TAG="${BENTOML_MODEL_TAG:-gbr:latest}"
+# === SHELL_EXPORT_GENERATED_START ===
+# 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成
+# 请勿手动编辑此段，修改后运行生成脚本覆盖
+# 共 11 个环境变量（部署目标: shell）
+
+export API_HOST=${API_HOST:-0.0.0.0}
+export API_PORT=${API_PORT:-8000}
+export MODEL_DIR=${MODEL_DIR:-$PROJECT_ROOT/shared_models}
+export MODEL_FILENAME=${MODEL_FILENAME:-sklearn_gbr.pkl}
+export MODEL_METADATA_FILENAME=${MODEL_METADATA_FILENAME:-model_metadata.json}
+export MODEL_STATUS_FILENAME=${MODEL_STATUS_FILENAME:-model_status.json}
+export DATA_CSV_FILENAME=${DATA_CSV_FILENAME:-cars.csv}
+export DATA_DIR=${DATA_DIR:-$PROJECT_ROOT/Data}
+export API_BASE_URL=${API_BASE_URL:-http://localhost:$API_PORT}
+export REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-10}
+export BENTOML_MODEL_TAG=${BENTOML_MODEL_TAG:-gbr:latest}
+# === SHELL_EXPORT_GENERATED_END ===
 export PYTHONPATH="$PROJECT_ROOT:$SCRIPT_DIR:$PYTHONPATH"
 
 echo "=== Car Pricing API 启动配置 ==="

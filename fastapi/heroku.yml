@@ -1,18 +1,22 @@
 build:
   docker:
     web: Dockerfile
+# === HEROKU_BUILD_CONFIG_GENERATED_START ===
+  # 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成
+  # 请勿手动编辑此段，修改后运行生成脚本覆盖
   config:
-    # === 统一运行时配置 (与 car_pricing/config.py 变量名完全对齐) ===
     API_HOST: "0.0.0.0"
     API_PORT: "8000"
     MODEL_DIR: "/app/shared_models"
     MODEL_FILENAME: "sklearn_gbr.pkl"
     MODEL_METADATA_FILENAME: "model_metadata.json"
     MODEL_STATUS_FILENAME: "model_status.json"
-    DATA_DIR: "/app/Data"
     DATA_CSV_FILENAME: "cars.csv"
+    DATA_DIR: "/app/Data"
+    API_BASE_URL: "http://localhost:8000"
     REQUEST_TIMEOUT: "10"
     BENTOML_MODEL_TAG: "gbr:latest"
+# === HEROKU_BUILD_CONFIG_GENERATED_END ===
 
 run:
   web: >

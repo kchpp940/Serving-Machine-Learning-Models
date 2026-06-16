@@ -11,8 +11,9 @@
       "MODEL_FILENAME": "sklearn_gbr.pkl",
       "MODEL_METADATA_FILENAME": "model_metadata.json",
       "MODEL_STATUS_FILENAME": "model_status.json",
-      "DATA_DIR": "./Data",
       "DATA_CSV_FILENAME": "cars.csv",
+      "DATA_DIR": "./Data",
+      "API_BASE_URL": "http://localhost:8000",
       "REQUEST_TIMEOUT": "10",
       "BENTOML_MODEL_TAG": "gbr:latest"
     }
@@ -23,6 +24,9 @@
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/app.py" }
+    {
+      "source": "/(.*)",
+      "destination": "/app.py"
+    }
   ]
 }

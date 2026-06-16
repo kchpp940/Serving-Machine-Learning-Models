@@ -29,19 +29,28 @@ WORKDIR /app/car_pricing_api
 
 ENV PYTHONPATH=/app:/app/car_pricing_api
 
-# === 统一运行时配置 (与 car_pricing/config.py 变量名完全对齐) ===
-# 这些是默认值，部署时可通过 docker run -e 或平台环境变量覆盖
+# === DOCKER_ENV_GENERATED_START ===
+# 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成
+# 请勿手动编辑此段，修改后运行生成脚本覆盖
+# 共 11 个环境变量（部署目标: docker）
+
+# === API server configuration ===
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
+# === Model file locations ===
 ENV MODEL_DIR=/app/shared_models
 ENV MODEL_FILENAME=sklearn_gbr.pkl
 ENV MODEL_METADATA_FILENAME=model_metadata.json
 ENV MODEL_STATUS_FILENAME=model_status.json
-ENV DATA_DIR=/app/Data
+# === Training data locations ===
 ENV DATA_CSV_FILENAME=cars.csv
+ENV DATA_DIR=/app/Data
+# === Client configuration ===
 ENV API_BASE_URL=http://localhost:${API_PORT}
 ENV REQUEST_TIMEOUT=10
+# === BentoML configuration ===
 ENV BENTOML_MODEL_TAG=gbr:latest
+# === DOCKER_ENV_GENERATED_END ===
 
 # === 启动脚本：将 Heroku 的 PORT 映射到 API_PORT，然后启动 ===
 # 这样 car_pricing.config 能正确读取统一的 API_PORT 变量

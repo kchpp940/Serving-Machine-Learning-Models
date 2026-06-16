@@ -1,16 +1,35 @@
-"""从 RuntimeConfig schema 生成配置产物。
+"""从 RuntimeConfig schema 生成所有配置产物（单一真相来源）。
 
 单一真相来源：car_pricing.config.export_env_schema()
-本脚本用于生成：
-  - .env.example
-  - 校验部署文件的环境变量覆盖
-  - 生成部署文档摘要
+
+本脚本从 schema 自动生成以下内容，新增变量时无需手改多份配置：
+  - .env.example                              （覆盖生成）
+  - Dockerfile 中的 ENV block                 （增量更新生成区域）
+  - heroku.yml 中的 build.config 段           （增量更新生成区域）
+  - vercel.json 中的 build.env 段             （JSON 结构增量更新）
+  - Procfile 中的 export 变量声明             （增量更新生成区域）
+  - fastapi-setup.sh 中的 export 变量声明     （增量更新生成区域）
+  - CONFIG_REFERENCE.md 配置参考文档          （覆盖生成）
+
+标记格式：
+  # === <SECTION>_GENERATED_START ===
+  ... (自动生成的内容，下次运行会被覆盖)
+  # === <SECTION>_GENERATED_END ===
+
+不同部署目标的默认值差异：
+  - Dockerfile: MODEL_DIR=/app/shared_models, DATA_DIR=/app/Data
+  - heroku.yml build.config: 同 Dockerfile
+  - Procfile: 同 Dockerfile，且有 Heroku PORT->API_PORT 映射
+  - fastapi-setup.sh: MODEL_DIR=$PROJECT_ROOT/shared_models 等
+  - vercel.json: 使用 schema 默认值（相对路径）
 
 运行方式：
-    python scripts/generate_config_artifacts.py          # 全部生成
-    python scripts/generate_config_artifacts.py .env     # 仅生成 .env.example
-    python scripts/generate_config_artifacts.py audit    # 仅审计部署文件
-    python scripts/generate_config_artifacts.py docs     # 仅生成文档
+    python scripts/generate_config_artifacts.py              # 全部生成（推荐）
+    python scripts/generate_config_artifacts.py deploy       # 仅生成部署配置
+    python scripts/generate_config_artifacts.py .env         # 仅生成 .env.example
+    python scripts/generate_config_artifacts.py audit        # 仅审计部署文件
+    python scripts/generate_config_artifacts.py docs         # 仅打印文档到 stdout
+    python scripts/generate_config_artifacts.py dry-run      # 预览变更不写入
 """
 from __future__ import annotations
 
@@ -19,8 +38,9 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -33,18 +53,9 @@ from car_pricing.config import (  # noqa: E402
 )
 
 
-DEPLOYMENT_FILES = [
-    ("car_pricing_api/Dockerfile", "docker"),
-    ("fastapi/Dockerfile", "docker"),
-    ("car_pricing_api/heroku.yml", "heroku"),
-    ("fastapi/heroku.yml", "heroku"),
-    ("car_pricing_api/vercel.json", "vercel"),
-    ("fastapi/vercel.json", "vercel"),
-    ("car_pricing_api/fastapi-setup.sh", "shell"),
-    ("fastapi/fastapi-setup.sh", "shell"),
-    ("Procfile", "procfile"),
-]
-
+# ===== 生成区域标记常量（会自动加上 comment_prefix 和 === 装饰） =====
+MARKER_START_FMT = "{prefix} === {section}_GENERATED_START ==="
+MARKER_END_FMT = "{prefix} === {section}_GENERATED_END ==="
 
 CATEGORY_TITLES = {
     "api": "API server configuration",
@@ -55,6 +66,156 @@ CATEGORY_TITLES = {
     "general": "Other",
 }
 
+# ===== 部署目标默认值覆盖映射 =====
+# key: 部署目标名
+# value: {变量名: (默认值覆盖, 是否使用模板语法引用)}
+DEPLOYMENT_VALUE_OVERRIDES: Dict[str, Dict[str, str]] = {
+    # Docker 容器内路径
+    "docker": {
+        "MODEL_DIR": "/app/shared_models",
+        "DATA_DIR": "/app/Data",
+        # API_BASE_URL 可以直接写模板形式
+        "API_BASE_URL": "http://localhost:${API_PORT}",
+    },
+    # Heroku build.config（和 Docker 一样用 /app/...）
+    "heroku": {
+        "MODEL_DIR": "/app/shared_models",
+        "DATA_DIR": "/app/Data",
+    },
+    # Vercel（与本地开发一致，相对路径，MODEL_DIR/DATA_DIR 取实际默认值）
+    "vercel": {
+        "MODEL_DIR": "./shared_models",
+        "DATA_DIR": "./Data",
+    },
+    # 本地 shell 脚本
+    "shell": {
+        "MODEL_DIR": "$PROJECT_ROOT/shared_models",
+        "DATA_DIR": "$PROJECT_ROOT/Data",
+        "API_BASE_URL": "http://localhost:$API_PORT",
+    },
+    # Procfile（Heroku 启动命令，和 Docker 类似）
+    "procfile": {
+        "MODEL_DIR": "/app/shared_models",
+        "DATA_DIR": "/app/Data",
+        "API_BASE_URL": "http://localhost:${API_PORT}",
+    },
+}
+
+
+# =============================================================================
+# 核心工具：根据 schema 生成格式化后的变量名/默认值列表
+# =============================================================================
+
+def _resolve_value(meta: EnvVarMeta, target: str) -> str:
+    """根据部署目标解析变量的默认值字符串。
+
+    Args:
+        meta: schema 中的变量元数据
+        target: 部署目标名 (docker/heroku/vercel/shell/procfile)
+    """
+    overrides = DEPLOYMENT_VALUE_OVERRIDES.get(target, {})
+    if meta.name in overrides:
+        return overrides[meta.name]
+    default = meta.default
+    if default == "<auto-resolved>":
+        return default
+    if meta.type == "int":
+        return str(int(default))
+    return str(default)
+
+
+def generate_docker_env() -> str:
+    """生成 Dockerfile 中的 ENV 段。"""
+    schema_list = env_schema_to_list()
+    lines: List[str] = []
+    lines.append("# 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成")
+    lines.append("# 请勿手动编辑此段，修改后运行生成脚本覆盖")
+    lines.append(f"# 共 {len(schema_list)} 个环境变量（部署目标: docker）")
+    lines.append("")
+
+    current_category = None
+    for meta in schema_list:
+        if meta.category != current_category:
+            current_category = meta.category
+            lines.append(f"# === {CATEGORY_TITLES.get(current_category, current_category.upper())} ===")
+
+        value = _resolve_value(meta, "docker")
+        lines.append(f"ENV {meta.name}={value}")
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_heroku_build_config() -> str:
+    """生成 heroku.yml 中的 build.config 段。"""
+    schema_list = env_schema_to_list()
+    lines: List[str] = []
+    lines.append("  # 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成")
+    lines.append("  # 请勿手动编辑此段，修改后运行生成脚本覆盖")
+    lines.append("  config:")
+
+    for meta in schema_list:
+        value = _resolve_value(meta, "heroku")
+        lines.append(f'    {meta.name}: "{value}"')
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_shell_export() -> str:
+    """生成 shell 脚本中的 export 段（bash 语法）。"""
+    schema_list = env_schema_to_list()
+    lines: List[str] = []
+    lines.append("# 由 scripts/generate_config_artifacts.py 从 car_pricing.config.export_env_schema() 自动生成")
+    lines.append("# 请勿手动编辑此段，修改后运行生成脚本覆盖")
+    lines.append(f"# 共 {len(schema_list)} 个环境变量（部署目标: shell）")
+    lines.append("")
+
+    for meta in schema_list:
+        value = _resolve_value(meta, "shell")
+        # shell 语法：export VAR_NAME=${VAR_NAME:-default}
+        lines.append(f'export {meta.name}=${{{meta.name}:-{value}}}')
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_procfile_export() -> str:
+    """生成 Procfile 中的 export 段（带 web: 前缀，末尾有 && 续行符）。
+
+    输出格式：
+        web: export A=... && export B=... && export PORT_MAP && \
+
+    Procfile 中标记段之后应该继续写续行（以缩进行开头），例如：
+             export PYTHONPATH=... && \
+             cd ... && \
+             gunicorn ...
+    """
+    schema_list = env_schema_to_list()
+    lines: List[str] = []
+
+    # Procfile 中所有 export 在一行，用 && 连接
+    exports = []
+    for meta in schema_list:
+        value = _resolve_value(meta, "procfile")
+        if meta.name == "API_PORT":
+            # Heroku 特殊：PORT → API_PORT 映射
+            exports.append('API_PORT=${PORT:-${API_PORT:-8000}}')
+        else:
+            exports.append(f'{meta.name}=${{{meta.name}:-{value}}}')
+
+    # 生成 web: 开头的行，末尾 && \ 表示后续还有续行
+    export_str = " && ".join(f"export {e}" for e in exports)
+    lines.append(f"web: {export_str} && \\")
+
+    return "\n".join(lines) + "\n"
+
+
+def generate_env_dict_for_vercel() -> Dict[str, str]:
+    """生成 JSON 格式的 env 字典（用于 vercel.json）。"""
+    schema_list = env_schema_to_list()
+    return {
+        meta.name: _resolve_value(meta, "vercel")
+        for meta in schema_list
+    }
+
 
 def generate_env_example() -> str:
     """从 schema 生成 .env.example 内容。"""
@@ -62,6 +223,7 @@ def generate_env_example() -> str:
     lines: List[str] = []
     lines.append("# Unified runtime configuration for Serving-Machine-Learning-Models")
     lines.append("# Single source of truth: car_pricing.config.export_env_schema()")
+    lines.append("# Generated by: scripts/generate_config_artifacts.py .env")
     lines.append("# Default values are defined in car_pricing/config.py")
     lines.append("# Copy this file to .env and adjust as needed")
     lines.append("")
@@ -74,15 +236,313 @@ def generate_env_example() -> str:
             current_category = meta.category
             lines.append(f"# === {CATEGORY_TITLES.get(current_category, current_category.upper())} ===")
         lines.append(f"# {meta.description}")
-        default_str = str(meta.default)
+        value = _resolve_value(meta, "vercel")  # 用本地默认值
         if meta.sensitive:
             lines.append(f"# {meta.name}=")
         else:
-            lines.append(f"#{meta.name}={default_str}")
+            lines.append(f"#{meta.name}={value}")
         lines.append("")
 
     return "\n".join(lines) + "\n"
 
+
+def generate_docs_summary() -> str:
+    """生成配置文档摘要（Markdown 格式）。"""
+    schema_list = env_schema_to_list()
+    lines: List[str] = []
+
+    lines.append("# 运行时配置环境变量参考")
+    lines.append("")
+    lines.append("> 单一真相来源：`car_pricing.config.export_env_schema()`")
+    lines.append("> 本文件由 `scripts/generate_config_artifacts.py docs` 自动生成，请勿手动修改")
+    lines.append("")
+    lines.append("## 概览")
+    lines.append("")
+    lines.append(f"共 **{len(schema_list)}** 个环境变量，按类别分组：")
+    lines.append("")
+    category_counts: Dict[str, int] = {}
+    for meta in schema_list:
+        category_counts[meta.category] = category_counts.get(meta.category, 0) + 1
+    for cat, count in category_counts.items():
+        title = CATEGORY_TITLES.get(cat, cat.upper())
+        lines.append(f"- **{title}**: {count} 个变量")
+    lines.append("")
+    lines.append("## 详细说明")
+    lines.append("")
+
+    current_category = None
+    for meta in schema_list:
+        if meta.category != current_category:
+            current_category = meta.category
+            lines.append("")
+            lines.append(f"### {CATEGORY_TITLES.get(current_category, current_category.upper())}")
+            lines.append("")
+            lines.append("| 变量名 | 默认值 | 类型 | 敏感 | 必需 | 说明 |")
+            lines.append("|--------|--------|------|------|------|------|")
+
+        default_str = str(meta.default)
+        if meta.sensitive:
+            default_str = "***"
+        elif default_str == "<auto-resolved>":
+            default_str = f"*{default_str}*"
+        sensitive = "✅" if meta.sensitive else "❌"
+        required = "✅" if meta.required_in_deployment else "❌"
+        lines.append(
+            f"| `{meta.name}` | `{default_str}` | {meta.type} | {sensitive} | {required} | {meta.description} |"
+        )
+
+    lines.append("")
+    lines.append("## 部署目标默认值差异")
+    lines.append("")
+    lines.append("不同部署平台对路径等变量有不同的默认值约定：")
+    lines.append("")
+    lines.append("| 变量名 | Schema 本地默认 | Docker/Heroku | Shell 脚本 | Vercel |")
+    lines.append("|--------|-----------------|---------------|------------|--------|")
+    for meta in schema_list:
+        local = str(meta.default) if not meta.sensitive else "***"
+        docker_v = _resolve_value(meta, "docker")
+        shell_v = _resolve_value(meta, "shell")
+        vercel_v = _resolve_value(meta, "vercel")
+        # 如果全部相同则合并显示
+        if local == docker_v == shell_v == vercel_v:
+            lines.append(f"| `{meta.name}` | `{local}` | 同左 | 同左 | 同左 |")
+        else:
+            lines.append(f"| `{meta.name}` | `{local}` | `{docker_v}` | `{shell_v}` | `{vercel_v}` |")
+
+    lines.append("")
+    lines.append("## 如何新增/修改配置")
+    lines.append("")
+    lines.append("1. 编辑 `car_pricing/config.py`，在 `export_env_schema()` 中添加/修改变量定义")
+    lines.append("2. 如果需要全局 `_DEFAULT_*` 常量，在文件顶部添加")
+    lines.append("3. 如果变量在不同部署目标有不同默认值（如绝对路径），在脚本顶部的 `DEPLOYMENT_VALUE_OVERRIDES` 添加映射")
+    lines.append("4. 运行以下命令自动更新所有部署配置：")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("# 从 schema 重新生成所有配置产物（推荐）")
+    lines.append("python scripts/generate_config_artifacts.py")
+    lines.append("")
+    lines.append("# 仅更新部署文件（Dockerfile/heroku/vercel 等）")
+    lines.append("python scripts/generate_config_artifacts.py deploy")
+    lines.append("")
+    lines.append("# 仅预览变更，不写入文件")
+    lines.append("python scripts/generate_config_artifacts.py dry-run")
+    lines.append("")
+    lines.append("# 验证一致性")
+    lines.append("python tests/test_config_consistency.py")
+    lines.append("```")
+
+    return "\n".join(lines) + "\n"
+
+
+# =============================================================================
+# 所有需要增量更新的部署文件及其配置
+# =============================================================================
+
+DEPLOYMENT_TEMPLATES = [
+    {
+        "path": "car_pricing_api/Dockerfile",
+        "section": "DOCKER_ENV",
+        "generator": generate_docker_env,
+    },
+    {
+        "path": "fastapi/Dockerfile",
+        "section": "DOCKER_ENV",
+        "generator": generate_docker_env,
+    },
+    {
+        "path": "car_pricing_api/heroku.yml",
+        "section": "HEROKU_BUILD_CONFIG",
+        "generator": generate_heroku_build_config,
+    },
+    {
+        "path": "fastapi/heroku.yml",
+        "section": "HEROKU_BUILD_CONFIG",
+        "generator": generate_heroku_build_config,
+    },
+    {
+        "path": "car_pricing_api/fastapi-setup.sh",
+        "section": "SHELL_EXPORT",
+        "generator": generate_shell_export,
+    },
+    {
+        "path": "fastapi/fastapi-setup.sh",
+        "section": "SHELL_EXPORT",
+        "generator": generate_shell_export,
+    },
+    {
+        "path": "Procfile",
+        "section": "PROCFILE_EXPORT",
+        "generator": generate_procfile_export,
+    },
+]
+
+# JSON 格式的部署配置（vercel.json）
+JSON_DEPLOYMENT_FILES = [
+    {
+        "path": "car_pricing_api/vercel.json",
+        "json_path": ["build", "env"],
+        "generator": generate_env_dict_for_vercel,
+    },
+    {
+        "path": "fastapi/vercel.json",
+        "json_path": ["build", "env"],
+        "generator": generate_env_dict_for_vercel,
+    },
+]
+
+
+# =============================================================================
+# 文件更新函数：增量更新带有标记区域的文件
+# =============================================================================
+
+def _replace_marker_section(
+    content: str,
+    section: str,
+    new_block: str,
+    comment_prefix: str = "#",
+) -> Tuple[str, bool]:
+    """替换内容中的标记区域。
+
+    如果标记不存在，则在文件末尾追加；如果存在则替换整个段（含标记行）。
+
+    Returns:
+        (更新后的内容, 是否发生了变更)
+    """
+    start_marker = MARKER_START_FMT.format(prefix=comment_prefix, section=section)
+    end_marker = MARKER_END_FMT.format(prefix=comment_prefix, section=section)
+
+    start_idx = content.find(start_marker)
+    end_idx = content.find(end_marker)
+
+    # 如果找不到标记，则在文件末尾追加
+    if start_idx == -1 or end_idx == -1:
+        if not content.endswith("\n"):
+            content += "\n"
+        content += "\n"
+        content += f"{start_marker}\n"
+        content += new_block
+        content += f"{end_marker}\n"
+        return content, True
+
+    # 找到替换的起止位置（包含标记行本身）
+    start_line_start = content.rfind("\n", 0, start_idx)
+    if start_line_start == -1:
+        start_line_start = 0
+    else:
+        start_line_start += 1  # 跳过换行符本身，指向行首
+
+    end_line_end = content.find("\n", end_idx)
+    if end_line_end == -1:
+        end_line_end = len(content)
+    else:
+        end_line_end += 1  # 包含换行符
+
+    new_section = (
+        f"{start_marker}\n"
+        f"{new_block}"
+        f"{end_marker}\n"
+    )
+
+    new_content = content[:start_line_start] + new_section + content[end_line_end:]
+
+    changed = new_content != content
+    return new_content, changed
+
+
+def _update_json_field(
+    data: Dict,
+    json_path: List[str],
+    new_value: Dict,
+) -> Tuple[Dict, bool]:
+    """更新 JSON 数据中的嵌套字段。
+
+    Returns:
+        (更新后的数据, 是否发生了变更)
+    """
+    current = data
+    for key in json_path[:-1]:
+        if key not in current:
+            current[key] = {}
+        elif not isinstance(current[key], dict):
+            current[key] = {}
+        current = current[key]
+
+    final_key = json_path[-1]
+    old_value = current.get(final_key, {})
+
+    if old_value == new_value:
+        return data, False
+
+    current[final_key] = new_value
+    return data, True
+
+
+def update_deployment_file(
+    template: Dict,
+    dry_run: bool = False,
+) -> Tuple[bool, str]:
+    """更新单个部署配置文件（带标记段的文本文件）。
+
+    Returns:
+        (是否变更, 变更说明)
+    """
+    file_path = PROJECT_ROOT / template["path"]
+    if not file_path.exists():
+        return False, f"跳过（不存在）: {template['path']}"
+
+    new_block = template["generator"]()
+    content = file_path.read_text(encoding="utf-8")
+
+    new_content, changed = _replace_marker_section(
+        content,
+        template["section"],
+        new_block,
+        comment_prefix="#",
+    )
+
+    if not changed:
+        return False, f"✅ 无变更: {template['path']}"
+
+    if dry_run:
+        return True, f"[DRY-RUN] 将更新: {template['path']}"
+
+    file_path.write_text(new_content, encoding="utf-8")
+    return True, f"✅ 已更新: {template['path']}"
+
+
+def update_json_deployment_file(
+    template: Dict,
+    dry_run: bool = False,
+) -> Tuple[bool, str]:
+    """更新 JSON 格式的部署配置文件。"""
+    file_path = PROJECT_ROOT / template["path"]
+    if not file_path.exists():
+        return False, f"跳过（不存在）: {template['path']}"
+
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return False, f"❌ JSON 解析失败: {template['path']}: {e}"
+
+    new_env = template["generator"]()
+    new_data, changed = _update_json_field(data, template["json_path"], new_env)
+
+    if not changed:
+        return False, f"✅ 无变更: {template['path']}"
+
+    if dry_run:
+        return True, f"[DRY-RUN] 将更新 JSON {'.'.join(template['json_path'])}: {template['path']}"
+
+    file_path.write_text(
+        json.dumps(new_data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return True, f"✅ 已更新 JSON {'.'.join(template['json_path'])}: {template['path']}"
+
+
+# =============================================================================
+# 产物写入函数
+# =============================================================================
 
 def write_env_example() -> Path:
     """生成并写入 .env.example 文件。"""
@@ -93,12 +553,21 @@ def write_env_example() -> Path:
     return target
 
 
-def audit_deployment_file(file_path: Path, file_type: str) -> Tuple[List[str], List[str], Set[str]]:
-    """审计单个部署文件的环境变量覆盖。
+def write_docs_summary() -> Path:
+    """生成并写入配置参考文档。"""
+    content = generate_docs_summary()
+    target = PROJECT_ROOT / "CONFIG_REFERENCE.md"
+    target.write_text(content, encoding="utf-8")
+    print(f"✅ 已生成 {target.relative_to(PROJECT_ROOT)}")
+    return target
 
-    Returns:
-        (errors, warnings, found_vars)
-    """
+
+# =============================================================================
+# 审计函数
+# =============================================================================
+
+def audit_deployment_file(file_path: Path, file_type: str) -> Tuple[List[str], List[str], Set[str]]:
+    """审计单个部署文件的环境变量覆盖。"""
     errors: List[str] = []
     warnings: List[str] = []
     found_vars: Set[str] = set()
@@ -109,58 +578,36 @@ def audit_deployment_file(file_path: Path, file_type: str) -> Tuple[List[str], L
     content = file_path.read_text(encoding="utf-8")
     schema = export_env_schema()
 
-    # 提取文件中出现的所有环境变量名
     for var_name in schema.keys():
         if re.search(rf"\b{var_name}\b", content):
             found_vars.add(var_name)
 
-    # 检查 required_in_deployment 的变量是否存在
     missing = validate_env_coverage(list(found_vars))
-
-    # 不同类型的文件有不同的期望
     expected_vars = {
         name for name, meta in schema.items()
         if meta.required_in_deployment
     }
 
     if file_type in ("docker", "shell", "procfile"):
-        # 这些文件应包含全部变量的声明或引用
         actually_missing = [v for v in missing if v in expected_vars]
         if actually_missing:
             warnings.append(f"缺少变量声明: {', '.join(actually_missing)}")
 
     elif file_type == "heroku":
-        # heroku.yml 的 build.config 段应包含变量
         if "build:" in content and "config:" in content:
-            pass  # 结构正确
+            pass
         else:
             warnings.append("未找到 build.config 段")
 
     elif file_type == "vercel":
-        # vercel.json 的 build.env 段应包含变量
         try:
             data = json.loads(content)
             if "build" in data and "env" in data["build"]:
-                pass  # 结构正确
+                pass
             else:
                 warnings.append("未找到 build.env 段")
         except json.JSONDecodeError as e:
             errors.append(f"JSON 解析失败: {e}")
-
-    # 检查是否有硬编码的端口或路径
-    hardcoded_patterns = [
-        (r"[\"']0\.0\.0\.0[\"']", "硬编码 API_HOST"),
-        (r":\s*8000\b", "硬编码端口 8000"),
-        (r"[\"']sklearn_gbr\.pkl[\"']", "硬编码模型文件名"),
-    ]
-    for pattern, desc in hardcoded_patterns:
-        for i, line in enumerate(content.splitlines(), 1):
-            if line.strip().startswith("#"):
-                continue
-            if "car_pricing.config" in line or "export_env_schema" in line:
-                continue
-            if re.search(pattern, line):
-                warnings.append(f"第 {i} 行: {desc}，应使用 ${schema['API_HOST'].name} 等环境变量")
 
     return errors, warnings, found_vars
 
@@ -170,12 +617,22 @@ def audit_all_deployment_files() -> Dict[str, Dict]:
     results: Dict[str, Dict] = {}
     all_found: Set[str] = set()
 
+    file_type_map = {
+        "Dockerfile": "docker",
+        "heroku.yml": "heroku",
+        "vercel.json": "vercel",
+        "fastapi-setup.sh": "shell",
+        "Procfile": "procfile",
+    }
+    all_files = [t["path"] for t in DEPLOYMENT_TEMPLATES] + [t["path"] for t in JSON_DEPLOYMENT_FILES]
+
     print("\n" + "=" * 70)
     print("部署文件环境变量审计")
     print("=" * 70)
 
-    for rel_path, file_type in DEPLOYMENT_FILES:
+    for rel_path in sorted(set(all_files)):
         full_path = PROJECT_ROOT / rel_path
+        file_type = file_type_map.get(Path(rel_path).name, "unknown")
         errors, warnings, found_vars = audit_deployment_file(full_path, file_type)
         all_found.update(found_vars)
 
@@ -193,10 +650,8 @@ def audit_all_deployment_files() -> Dict[str, Dict]:
             "errors": errors,
             "warnings": warnings,
             "found_vars": sorted(found_vars),
-            "file_type": file_type,
         }
 
-    # 总体覆盖率
     schema = export_env_schema()
     total = len(schema)
     covered = len(all_found)
@@ -212,104 +667,80 @@ def audit_all_deployment_files() -> Dict[str, Dict]:
     return results
 
 
-def generate_docs_summary() -> str:
-    """生成配置文档摘要（Markdown 格式）。"""
-    schema_list = env_schema_to_list()
-    lines: List[str] = []
-
-    lines.append("# 运行时配置环境变量")
-    lines.append("")
-    lines.append("> 单一真相来源：`car_pricing.config.export_env_schema()`")
-    lines.append("> 本文件由 `scripts/generate_config_artifacts.py docs` 自动生成，请勿手动修改")
-    lines.append("")
-
-    current_category = None
-    for meta in schema_list:
-        if meta.category != current_category:
-            current_category = meta.category
-            lines.append("")
-            lines.append(f"## {CATEGORY_TITLES.get(current_category, current_category.upper())}")
-            lines.append("")
-            lines.append("| 变量名 | 默认值 | 类型 | 敏感 | 必需 | 说明 |")
-            lines.append("|--------|--------|------|------|------|------|")
-
-        default_str = str(meta.default)
-        if meta.sensitive:
-            default_str = "***"
-        sensitive = "✅" if meta.sensitive else "❌"
-        required = "✅" if meta.required_in_deployment else "❌"
-        lines.append(
-            f"| `{meta.name}` | `{default_str}` | {meta.type} | {sensitive} | {required} | {meta.description} |"
-        )
-
-    lines.append("")
-    lines.append("## 生成方式")
-    lines.append("")
-    lines.append("```bash")
-    lines.append("# 从 schema 重新生成所有配置产物")
-    lines.append("python scripts/generate_config_artifacts.py")
-    lines.append("")
-    lines.append("# 仅重新生成 .env.example")
-    lines.append("python scripts/generate_config_artifacts.py .env")
-    lines.append("")
-    lines.append("# 仅审计部署文件")
-    lines.append("python scripts/generate_config_artifacts.py audit")
-    lines.append("")
-    lines.append("# 仅生成文档")
-    lines.append("python scripts/generate_config_artifacts.py docs > CONFIG_REFERENCE.md")
-    lines.append("```")
-
-    return "\n".join(lines) + "\n"
-
-
-def write_docs_summary() -> Path:
-    """生成并写入配置参考文档。"""
-    content = generate_docs_summary()
-    target = PROJECT_ROOT / "CONFIG_REFERENCE.md"
-    target.write_text(content, encoding="utf-8")
-    print(f"✅ 已生成 {target.relative_to(PROJECT_ROOT)}")
-    return target
-
+# =============================================================================
+# 主函数
+# =============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
-        description="从 RuntimeConfig schema 生成配置产物",
+        description="从 RuntimeConfig schema 生成所有配置产物（单一真相来源）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 单一真相来源：car_pricing.config.export_env_schema()
 
 命令：
-  all     (默认) 执行所有操作：生成 .env.example + 审计部署文件
-  .env    仅重新生成 .env.example
-  audit   仅审计部署文件的环境变量覆盖
-  docs    生成 CONFIG_REFERENCE.md 文档到 stdout
+  all       (默认) 全部生成：.env.example + 部署配置 + CONFIG_REFERENCE.md
+  deploy    仅更新部署配置文件（Dockerfile/heroku/vercel 等）
+  .env      仅重新生成 .env.example
+  audit     仅审计部署文件的环境变量覆盖
+  docs      生成 CONFIG_REFERENCE.md 文档
+  dry-run   预览所有变更，不写入文件
 """,
     )
     parser.add_argument(
         "command",
         nargs="?",
         default="all",
-        choices=["all", ".env", "audit", "docs"],
+        choices=["all", "deploy", ".env", "audit", "docs", "dry-run"],
         help="要执行的操作",
     )
     args = parser.parse_args()
 
-    # 验证 schema 本身能正常导出
     schema = export_env_schema()
     print(f"✅ 从 car_pricing.config 导出 schema，共 {len(schema)} 个环境变量")
+    for cat in sorted(set(m.category for m in schema.values())):
+        vars_in_cat = [m.name for m in schema.values() if m.category == cat]
+        print(f"   类别 {cat}: {', '.join(vars_in_cat)}")
 
-    if args.command in ("all", ".env"):
-        write_env_example()
+    dry_run = args.command == "dry-run"
 
-    if args.command in ("all", "audit"):
+    # ===== 生成 .env.example =====
+    if args.command in ("all", ".env", "deploy") or dry_run:
+        if not dry_run:
+            write_env_example()
+        else:
+            print("[DRY-RUN] 将生成 .env.example")
+
+    # ===== 更新部署配置文件 =====
+    if args.command in ("all", "deploy") or dry_run:
+        print(f"\n--- 更新文本部署文件 (标记段增量更新) ---")
+        for template in DEPLOYMENT_TEMPLATES:
+            changed, msg = update_deployment_file(template, dry_run=dry_run)
+            prefix = "🔄 " if changed else "   "
+            print(f"{prefix}{msg}")
+
+        print(f"\n--- 更新 JSON 部署文件 (结构增量更新) ---")
+        for template in JSON_DEPLOYMENT_FILES:
+            changed, msg = update_json_deployment_file(template, dry_run=dry_run)
+            prefix = "🔄 " if changed else "   "
+            print(f"{prefix}{msg}")
+
+    # ===== 审计部署文件 =====
+    if args.command in ("all", "audit") or dry_run:
         audit_all_deployment_files()
 
+    # ===== 生成文档 =====
     if args.command == "docs":
         print(generate_docs_summary())
+    elif args.command in ("all",) and not dry_run:
+        write_docs_summary()
 
-    if args.command == "all":
+    if args.command in ("all",):
         print("\n" + "=" * 70)
         print("所有配置产物生成完成")
+        print("=" * 70)
+        print("验证一致性：")
+        print("  python tests/test_config_consistency.py")
         print("=" * 70)
 
 
