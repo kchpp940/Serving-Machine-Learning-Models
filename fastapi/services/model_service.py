@@ -77,8 +77,6 @@ def predict_batch(rows: List[Any]) -> Dict[str, Any]:
         predictions.append(float(pred[0]))
     return {
         "predictions": predictions,
-        "count": len(predictions),
-        "status": "ok",
     }
 
 

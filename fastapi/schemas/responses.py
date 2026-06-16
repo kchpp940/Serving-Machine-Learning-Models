@@ -22,15 +22,11 @@ class PredictionResponse(BaseModel):
 
 class BatchPredictionResponse(BaseModel):
     predictions: List[float]
-    count: int
-    status: str = "ok"
 
     class Config:
         json_schema_extra = {
             "example": {
                 "predictions": [13295.27, 18500.5],
-                "count": 2,
-                "status": "ok",
             }
         }
 
