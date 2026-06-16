@@ -1,6 +1,4 @@
-web: gunicorn app:app
-
 # BEGIN AUTO-GENERATED ENV VARS — 不要手动修改此段，由 scripts/generate_config_artifacts.py 管理
-# 环境变量默认值（单一真相: export_env_schema().deployment_defaults['Docker/Heroku']）
-# Env defaults: API_HOST=0.0.0.0;API_PORT=8000;MODEL_DIR=/app/shared_models;MODEL_FILENAME=sklearn_gbr.pkl;MODEL_METADATA_FILENAME=model_metadata.json;MODEL_STATUS_FILENAME=model_status.json;SCHEMA_SNAPSHOT_FILENAME=schema_snapshot.json;LINEAGE_FILENAME=model_lineage.json;DATA_CSV_FILENAME=cars.csv;DATA_DIR=/app/Data;API_BASE_URL=http://localhost:${API_PORT};REQUEST_TIMEOUT=10;BENTOML_MODEL_TAG=gbr:latest
+# 启动环境变量（shell env 前缀，实际生效，来源: export_env_schema）
+web: env API_HOST=0.0.0.0 API_PORT=8000 MODEL_DIR=/app/shared_models MODEL_FILENAME=sklearn_gbr.pkl MODEL_METADATA_FILENAME=model_metadata.json MODEL_STATUS_FILENAME=model_status.json SCHEMA_SNAPSHOT_FILENAME=schema_snapshot.json LINEAGE_FILENAME=model_lineage.json DATA_CSV_FILENAME=cars.csv DATA_DIR=/app/Data API_BASE_URL=http://localhost:${API_PORT} REQUEST_TIMEOUT=10 BENTOML_MODEL_TAG=gbr:latest gunicorn app:app
 # END AUTO-GENERATED ENV VARS

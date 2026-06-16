@@ -1,19 +1,19 @@
-
-
-  "__BEGIN_AUTO_GENERATED_ENV_VARS__": "不要手动修改此段，由 scripts/generate_config_artifacts.py 管理",
-  "__AUTO_GENERATED_ENV_VARS__": [
-    {"key": "API_HOST", "value": "0.0.0.0"},
-    {"key": "API_PORT", "value": "8000"},
-    {"key": "MODEL_DIR", "value": "<auto-resolved>"},
-    {"key": "MODEL_FILENAME", "value": "sklearn_gbr.pkl"},
-    {"key": "MODEL_METADATA_FILENAME", "value": "model_metadata.json"},
-    {"key": "MODEL_STATUS_FILENAME", "value": "model_status.json"},
-    {"key": "SCHEMA_SNAPSHOT_FILENAME", "value": "schema_snapshot.json"},
-    {"key": "LINEAGE_FILENAME", "value": "model_lineage.json"},
-    {"key": "DATA_CSV_FILENAME", "value": "cars.csv"},
-    {"key": "DATA_DIR", "value": "<auto-resolved>"},
-    {"key": "API_BASE_URL", "value": "http://localhost:8000"},
-    {"key": "REQUEST_TIMEOUT", "value": "10"},
-    {"key": "BENTOML_MODEL_TAG", "value": "gbr:latest"}
-  ],
-  "__END_AUTO_GENERATED_ENV_VARS__": "标记结束"
+{
+  "build": {
+    "env": {
+      "API_HOST": "0.0.0.0",
+      "API_PORT": "8000",
+      "MODEL_DIR": "<auto-resolved>",
+      "MODEL_FILENAME": "sklearn_gbr.pkl",
+      "MODEL_METADATA_FILENAME": "model_metadata.json",
+      "MODEL_STATUS_FILENAME": "model_status.json",
+      "SCHEMA_SNAPSHOT_FILENAME": "schema_snapshot.json",
+      "LINEAGE_FILENAME": "model_lineage.json",
+      "DATA_CSV_FILENAME": "cars.csv",
+      "DATA_DIR": "<auto-resolved>",
+      "API_BASE_URL": "http://localhost:8000",
+      "REQUEST_TIMEOUT": "10",
+      "BENTOML_MODEL_TAG": "gbr:latest"
+    }
+  }
+}

@@ -61,14 +61,17 @@ FIELD_TO_ENV = {
 EXPECTED_ENV_VARS = sorted(FIELD_TO_ENV.values())
 EXPECTED_VAR_COUNT = 13
 
-DEPLOY_FILES_WITH_MARKERS: List[Tuple[str, str, str]] = [
-    ("fastapi/Dockerfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS"),
-    ("car_pricing_api/Dockerfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS"),
-    ("flaskapp/Procfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS"),
-    ("fastapi/heroku.yml", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS"),
-    ("car_pricing_api/heroku.yml", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS"),
-    ("fastapi/vercel.json", "\"__BEGIN_AUTO_GENERATED_ENV_VARS__\":", "\"__END_AUTO_GENERATED_ENV_VARS__\":"),
-    ("car_pricing_api/vercel.json", "\"__BEGIN_AUTO_GENERATED_ENV_VARS__\":", "\"__END_AUTO_GENERATED_ENV_VARS__\":"),
+DEPLOY_FILES_MARKER: List[Tuple[str, str, str, str]] = [
+    ("fastapi/Dockerfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS", "dockerfile"),
+    ("car_pricing_api/Dockerfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS", "dockerfile"),
+    ("flaskapp/Procfile", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS", "procfile"),
+    ("fastapi/heroku.yml", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS", "heroku"),
+    ("car_pricing_api/heroku.yml", "# BEGIN AUTO-GENERATED ENV VARS", "# END AUTO-GENERATED ENV VARS", "heroku"),
+]
+
+DEPLOY_FILES_FIELD: List[str] = [
+    "fastapi/vercel.json",
+    "car_pricing_api/vercel.json",
 ]
 
 
@@ -344,58 +347,142 @@ def test_7_schema_snapshot_lineage_fully_included() -> None:
     print("[✓] SCHEMA_SNAPSHOT_FILENAME / LINEAGE_FILENAME 完整纳入 7 层一致性链路")
 
 
-def test_8_deploy_files_marker_segments() -> None:
-    """Dockerfile/Procfile/heroku.yml/vercel.json 标记段存在且包含 13 个环境变量"""
+def test_8_deploy_files_env_vars_present() -> None:
+    """所有部署文件中都存在 13 个 schema 环境变量（标记段 或 字段级）。"""
+    import json
     schema = export_env_schema()
     expected_names = [v["name"] for v in schema["variables"]]
 
     missing_files: List[str] = []
-    missing_markers: List[str] = []
     missing_vars: List[str] = []
 
-    for rel, begin, end in DEPLOY_FILES_WITH_MARKERS:
+    # 标记段式文件
+    for rel, begin, end, _kind in DEPLOY_FILES_MARKER:
         full_path = os.path.join(PROJECT_ROOT, rel)
         if not os.path.isfile(full_path):
             missing_files.append(rel)
             continue
-
         with open(full_path, "r", encoding="utf-8") as f:
             content = f.read()
-
-        if begin not in content:
-            missing_markers.append(f"{rel}: 缺少开始标记 {begin!r}")
+        if begin not in content or end not in content:
+            missing_vars.append(f"{rel}: 缺少标记段 {begin}..{end}")
             continue
-        if end not in content:
-            missing_markers.append(f"{rel}: 缺少结束标记 {end!r}")
-            continue
-
         pattern = re.compile(
             rf"{re.escape(begin)}(.*?){re.escape(end)}",
             flags=re.DOTALL,
         )
         m = pattern.search(content)
         if m is None:
-            missing_markers.append(f"{rel}: 无法匹配开始/结束标记之间的内容")
+            missing_vars.append(f"{rel}: 标记段无内容")
             continue
-
         segment = m.group(1)
         for env_name in expected_names:
             if env_name not in segment:
                 missing_vars.append(f"{rel}: 标记段中缺少 {env_name}")
 
+    # 字段级文件 (vercel.json)
+    for rel in DEPLOY_FILES_FIELD:
+        full_path = os.path.join(PROJECT_ROOT, rel)
+        if not os.path.isfile(full_path):
+            missing_files.append(rel)
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            missing_vars.append(f"{rel}: JSON 解析失败")
+            continue
+        env_obj = data.get("build", {}).get("env", {})
+        for env_name in expected_names:
+            if env_name not in env_obj:
+                missing_vars.append(f"{rel}: build.env 中缺少 {env_name}")
+
     if missing_files:
         raise AssertionError("部署文件不存在:\n  " + "\n  ".join(missing_files))
-    if missing_markers:
-        raise AssertionError("部署文件标记段缺失:\n  " + "\n  ".join(missing_markers))
     if missing_vars:
         raise AssertionError(
-            "部署文件标记段中环境变量不完整:\n  " + "\n  ".join(missing_vars)
+            "部署文件环境变量不完整:\n  " + "\n  ".join(missing_vars)
         )
 
-    print(f"[✓] {len(DEPLOY_FILES_WITH_MARKERS)} 个部署文件标记段完整，含 {len(expected_names)} 个环境变量")
+    total = len(DEPLOY_FILES_MARKER) + len(DEPLOY_FILES_FIELD)
+    print(f"[✓] {total} 个部署文件均包含 {len(expected_names)} 个环境变量")
 
 
-def test_9_generate_script_single_source() -> None:
+def test_9_deploy_files_platform_native_locations() -> None:
+    """环境变量放在平台原生读取的位置（不是追加到文件末尾的展示区）。"""
+    import json
+
+    # 1. Dockerfile: ENV 在 WORKDIR 之后，且是合法 ENV 指令
+    for rel in ["fastapi/Dockerfile", "car_pricing_api/Dockerfile"]:
+        full_path = os.path.join(PROJECT_ROOT, rel)
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        workdir_matches = list(re.finditer(r"^WORKDIR\s+", content, re.MULTILINE))
+        env_matches = list(re.finditer(r"^ENV\s+", content, re.MULTILINE))
+        assert workdir_matches, f"{rel}: 缺少 WORKDIR 指令"
+        assert env_matches, f"{rel}: 缺少 ENV 指令"
+        assert len(env_matches) == 13, f"{rel}: ENV 指令数应为 13，实际 {len(env_matches)}"
+        assert env_matches[0].start() > workdir_matches[-1].start(), (
+            f"{rel}: ENV 指令不在 WORKDIR 之后"
+        )
+        assert "BEGIN AUTO-GENERATED" in content, f"{rel}: 缺少 BEGIN 标记"
+        assert content.count("BEGIN AUTO-GENERATED") == 1, f"{rel}: 有多个 BEGIN 标记"
+
+    # 2. heroku.yml: 在 build.config 层级（YAML 解析验证）
+    try:
+        import yaml
+        has_yaml = True
+    except ImportError:
+        has_yaml = False
+        print("    (跳过 heroku.yml YAML 解析验证: 未安装 PyYAML)")
+
+    if has_yaml:
+        for rel in ["fastapi/heroku.yml", "car_pricing_api/heroku.yml"]:
+            full_path = os.path.join(PROJECT_ROOT, rel)
+            with open(full_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            assert "build" in data, f"{rel}: 缺少 build 节点"
+            assert "config" in data["build"], f"{rel}: build 下缺少 config"
+            assert isinstance(data["build"]["config"], dict), f"{rel}: build.config 不是 dict"
+            assert len(data["build"]["config"]) == 13, (
+                f"{rel}: build.config 变量数应为 13，实际 {len(data['build']['config'])}"
+            )
+
+    # 3. vercel.json: 在 build.env 字段（JSON 解析验证）
+    for rel in DEPLOY_FILES_FIELD:
+        full_path = os.path.join(PROJECT_ROOT, rel)
+        with open(full_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert "build" in data, f"{rel}: 缺少 build"
+        assert "env" in data["build"], f"{rel}: build 缺少 env"
+        assert isinstance(data["build"]["env"], dict), f"{rel}: build.env 不是 dict"
+        assert len(data["build"]["env"]) == 13, (
+            f"{rel}: build.env 变量数应为 13，实际 {len(data['build']['env'])}"
+        )
+
+    # 4. Procfile: web: 命令带 env 前缀，shell 实际执行
+    for rel in ["flaskapp/Procfile"]:
+        full_path = os.path.join(PROJECT_ROOT, rel)
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        web_lines = [
+            l.strip() for l in content.splitlines()
+            if l.strip() and not l.strip().startswith("#") and l.strip().startswith("web:")
+        ]
+        assert len(web_lines) == 1, f"{rel}: 应只有 1 条 web: 命令，实际 {len(web_lines)}"
+        web_line = web_lines[0]
+        assert web_line.startswith("web: env "), f"{rel}: web 命令应以 'web: env ' 开头"
+        after_env = web_line[len("web: env "):]
+        parts = after_env.split(" ", 1)
+        assert len(parts) >= 2, f"{rel}: env 前缀后没有实际命令"
+        first_var = parts[0]
+        assert "=" in first_var, f"{rel}: env 前缀后第一个 token 不是变量赋值"
+        assert "gunicorn" in after_env, f"{rel}: 命令中没有 gunicorn（原命令被覆盖）"
+
+    print("[✓] 环境变量位于平台原生位置：Docker ENV/Heroku build.config/Vercel build.env/Procfile env 前缀")
+
+
+def test_10_generate_script_single_source() -> None:
     """scripts/generate_config_artifacts.py 只从 export_env_schema() 读取，不维护独立 overrides"""
     script_path = os.path.join(PROJECT_ROOT, "scripts", "generate_config_artifacts.py")
     with open(script_path, "r", encoding="utf-8") as f:
@@ -430,8 +517,9 @@ def run_all() -> int:
         test_5_value_for_no_second_overrides_source,
         test_6_env_example_structure,
         test_7_schema_snapshot_lineage_fully_included,
-        test_8_deploy_files_marker_segments,
-        test_9_generate_script_single_source,
+        test_8_deploy_files_env_vars_present,
+        test_9_deploy_files_platform_native_locations,
+        test_10_generate_script_single_source,
     ]
     failures = 0
     print(f"运行时配置一致性测试 ({len(tests)} 项)\n" + "=" * 60)

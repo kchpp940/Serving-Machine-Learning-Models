@@ -89,7 +89,7 @@
 # 从 schema 重新生成所有配置产物（推荐）
 python scripts/generate_config_artifacts.py
 
-# 仅更新部署文件（.env.example + Dockerfile/Procfile/vercel.json/heroku.yml 标记段）
+# 仅更新部署文件（.env.example + Dockerfile/Procfile/vercel.json/heroku.yml）
 python scripts/generate_config_artifacts.py deploy
 
 # 仅预览变更，不写入文件

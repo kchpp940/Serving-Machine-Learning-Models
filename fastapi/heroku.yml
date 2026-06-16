@@ -1,9 +1,6 @@
 build:
-  docker:
-    web: Dockerfile
-
 # BEGIN AUTO-GENERATED ENV VARS — 不要手动修改此段，由 scripts/generate_config_artifacts.py 管理
-# 环境变量默认值（单一真相: export_env_schema().deployment_defaults['Docker/Heroku']）
+# 构建阶段环境变量（Heroku build.config，来源: export_env_schema）
   config:
     API_HOST: "0.0.0.0"
     API_PORT: "8000"
@@ -19,3 +16,5 @@ build:
     REQUEST_TIMEOUT: "10"
     BENTOML_MODEL_TAG: "gbr:latest"
 # END AUTO-GENERATED ENV VARS
+  docker:
+    web: Dockerfile
