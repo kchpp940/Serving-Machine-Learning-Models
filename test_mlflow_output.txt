@@ -1,0 +1,27 @@
+=== 测试读取现有候选摘要 ===
+primary_metric: r2_score
+best_model: RandomForest
+best_run_id: 55418d08b28e49a0931070053a6db7f6
+best_metric_value: 0.9579190642755482
+schema_version: bb93c66eafaa
+data_version: 3ad389bc1c1d
+n_candidates: 3
+候选数量: 3
+最佳候选模型类型: RandomForestRegressor
+最佳模型 artifact hash: 77d89ba4a206e059e9f5578b91ec9f151dd1f0ba1c795c485fa5fc365b861f8a
+最佳候选信息:
+  模型名: RandomForest
+  模型类型: RandomForestRegressor
+  run_id: 55418d08b28e49a0931070053a6db7f6
+  metrics: {'r2_score': 0.9579190642755482, 'mse': 3322038.2684666603, 'mae': 1243.7370406504062}
+  params: {'n_estimators': 100, 'max_depth': None, 'random_state': 42}
+  artifact_hash: 77d89ba4a206e059e9f5578b91ec9f151dd1f0ba1c795c485fa5fc365b861f8a
+PASSED
+
+=== 测试 MLflowLineageReader ===
+MLflowLineageReader 创建失败: The filesystem tracking backend (e.g., './mlruns') is in maintenance mode and will not receive further updates. Please migrate to a database backend (e.g., 'sqlite:///mlflow.db') to access the latest MLflow features. The `mlflow migrate-filestore` tool migrates your existing data losslessly. See https://mlflow.org/docs/latest/self-hosting/migrate-from-file-store for migration guidance. If the filesystem backend is required for your workflow, set `MLFLOW_ALLOW_FILE_STORE=true` to opt out of this exception.
+跳过 MLflow 相关测试（可能 mlflow 未安装或无数据）
+
+==================================================
+MLflow 相关测试完成
+==================================================

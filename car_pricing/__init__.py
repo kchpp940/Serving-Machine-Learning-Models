@@ -11,21 +11,7 @@ from car_pricing.feature_schema import (
 )
 
 from car_pricing.model_runtime import CarPriceModel
-
-from car_pricing.model_lineage import (
-    CandidateInfo,
-    CandidateSummary,
-    ModelArtifactInfo,
-    ModelLineage,
-    MLflowLineageReader,
-    MLflowLineageWriter,
-    record_training_lineage,
-    load_runtime_lineage,
-    build_runtime_metadata,
-    build_bentoml_metadata,
-    build_fastapi_status,
-    create_candidate_summary_from_runs,
-)
+from car_pricing.api_client import CarPricingApiClient, ApiClientError
 
 __all__ = [
     "FeatureSchema",
@@ -38,16 +24,6 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "CandidateInfo",
-    "CandidateSummary",
-    "ModelArtifactInfo",
-    "ModelLineage",
-    "MLflowLineageReader",
-    "MLflowLineageWriter",
-    "record_training_lineage",
-    "load_runtime_lineage",
-    "build_runtime_metadata",
-    "build_bentoml_metadata",
-    "build_fastapi_status",
-    "create_candidate_summary_from_runs",
+    "CarPricingApiClient",
+    "ApiClientError",
 ]

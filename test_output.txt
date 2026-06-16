@@ -1,0 +1,18 @@
+=== 测试 CandidateInfo ===
+PASSED
+=== 测试 CandidateSummary ===
+PASSED
+=== 测试 ModelLineage ===
+PASSED
+=== 测试 Hash 函数 ===
+PASSED
+=== 测试构建函数 ===
+PASSED
+=== 测试候选摘要往返 ===
+PASSED
+=== 测试 ModelArtifactInfo ===
+PASSED
+
+==================================================
+所有测试通过!
+==================================================

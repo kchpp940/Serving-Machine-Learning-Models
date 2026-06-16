@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import sys
 import os
 import json
 from typing import Optional, Any, Dict
 
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 from car_pricing.model_runtime import CarPriceModel
+from car_pricing.versioning import compute_file_hash
 from car_pricing.model_lineage import (
-    load_runtime_lineage,
+    ModelLineage,
     build_fastapi_status,
-    build_runtime_metadata,
 )
 
 
@@ -45,12 +49,40 @@ class ModelService:
             self.load()
         return self._model
 
-    def get_lineage(self):
+    def get_lineage(self) -> ModelLineage:
         if self._lineage is None:
-            self._lineage = load_runtime_lineage(
-                model_path=self._model_path,
-                metadata_path=self._metadata_path,
-            )
+            model = self.model
+
+            if os.path.exists(self._metadata_path):
+                with open(self._metadata_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                self._lineage = ModelLineage(
+                    run_id=metadata.get("run_id", ""),
+                    experiment_id=metadata.get("experiment_id", ""),
+                    model_name=metadata.get("model_name", "sklearn_gbr"),
+                    model_type=metadata.get("model_type", ""),
+                    schema_version=metadata.get("schema_version", model.schema.schema_version()),
+                    data_version=metadata.get("data_version", ""),
+                    model_artifact_hash=metadata.get("model_artifact_hash", compute_file_hash(self._model_path)),
+                    metrics=dict(metadata.get("metrics", {})),
+                    params=dict(metadata.get("params", {})),
+                    parent_run_id=metadata.get("parent_run_id"),
+                    schema=model.schema,
+                )
+            else:
+                model_artifact_hash = compute_file_hash(self._model_path)
+                self._lineage = ModelLineage(
+                    run_id="",
+                    experiment_id="",
+                    model_name="sklearn_gbr",
+                    model_type="GradientBoostingRegressor",
+                    schema_version=model.schema.schema_version(),
+                    data_version="",
+                    model_artifact_hash=model_artifact_hash,
+                    metrics={},
+                    params={"n_features": model.schema.n_features()},
+                    schema=model.schema,
+                )
         return self._lineage
 
     def predict(self, data) -> float:
@@ -76,7 +108,7 @@ class ModelService:
 
     def get_metadata(self) -> Dict[str, Any]:
         lineage = self.get_lineage()
-        return build_runtime_metadata(lineage)
+        return lineage.to_runtime_metadata()
 
     def get_health(self) -> Dict[str, Any]:
         try:
