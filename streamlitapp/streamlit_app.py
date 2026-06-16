@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 import streamlit as st
 
 import state
-from constants import APP_TITLE
 from pages import prediction as page_prediction
 from pages import scenario_compare as page_scenario_compare
 from pages import system_status as page_system_status
@@ -41,10 +40,10 @@ def _render_sidebar_nav() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
+    st.set_page_config(page_title=state.APP_TITLE, layout="wide")
     state.init_state()
 
-    st.title(APP_TITLE)
+    st.title(state.APP_TITLE)
     st.markdown(
         """
     **This Streamlit App utilizes a Machine Learning model served as an API

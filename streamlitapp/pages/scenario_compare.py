@@ -3,27 +3,17 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-import api_client
 import state
 import ui_helpers
-from constants import API_BASE_URL
-
-
-def _ensure_schema():
-    if state.get_schema_cache() is None and state.get_schema_error() is None:
-        schema, error = api_client.fetch_schema()
-        if error is not None:
-            state.set_schema_error(error)
-        else:
-            state.set_schema_cache(schema)
-    return state.get_effective_schema()
 
 
 def _build_results_dataframe():
     results = state.get_prediction_results()
     if not results:
         return None
-    schema = state.get_effective_schema()
+    schema = state.get_schema_cache()
+    if schema is None:
+        return None
     rows = []
     for r in results:
         row = {"Scenario": r.scenario_name, "Predicted Price ($)": f"{r.prediction:.2f}"}
@@ -44,12 +34,21 @@ def render() -> None:
     """
     )
 
-    schema = _ensure_schema()
-    ui_helpers.ensure_schema_loaded(
-        schema,
-        state.get_schema_error(),
-        state.is_schema_using_fallback(),
-        API_BASE_URL,
+    schema = state.ensure_schema()
+    schema_error = state.get_schema_error()
+
+    if schema_error is not None:
+        st.warning(
+            f"{schema_error} Scenario comparison is unavailable until the service is reachable."
+        )
+        return
+
+    if schema is None:
+        st.info("Loading schema from the prediction service...")
+        return
+
+    st.success(
+        f"Loaded schema from {state.API_BASE_URL} ({len(schema['feature_order'])} features)"
     )
 
     st.subheader("Add New Scenario")
@@ -63,7 +62,7 @@ def render() -> None:
                 state.set_error_message("Please enter a scenario name.")
             else:
                 values = {field: inputs[field] for field in schema["feature_order"]}
-                prediction, error = api_client.predict(values)
+                prediction, error = state.predict(values)
                 if error is not None:
                     state.set_error_message(error)
                 else:

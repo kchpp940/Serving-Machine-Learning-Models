@@ -4,18 +4,16 @@ from typing import Any, Dict
 
 import streamlit as st
 
-from constants import FIELD_DISPLAY_NAMES
 
-
-def field_label(field: str) -> str:
-    return FIELD_DISPLAY_NAMES.get(field, field.replace("_", " ").title())
+def field_label(field_name: str) -> str:
+    return field_name.replace("_", " ").title()
 
 
 def build_form(schema: Dict[str, Any], key_prefix: str = "") -> Dict[str, Any]:
     feature_order = schema["feature_order"]
     numeric_features = set(schema["numeric_features"])
     categorical_features = set(schema["categorical_features"])
-    categorical_options = schema["categorical_options"]
+    categorical_options = schema.get("categorical_options", {})
 
     inputs: Dict[str, Any] = {}
     for field in feature_order:
@@ -28,7 +26,7 @@ def build_form(schema: Dict[str, Any], key_prefix: str = "") -> Dict[str, Any]:
             if not options:
                 inputs[field] = st.text_input(label, key=widget_key)
             else:
-                display_labels = [opt["display"] for opt in options]
+                display_labels = [opt.get("display", opt.get("form_value", str(opt))) for opt in options]
                 selected_idx = st.selectbox(
                     label,
                     range(len(display_labels)),
@@ -39,14 +37,3 @@ def build_form(schema: Dict[str, Any], key_prefix: str = "") -> Dict[str, Any]:
         else:
             inputs[field] = st.text_input(label, key=widget_key)
     return inputs
-
-
-def ensure_schema_loaded(schema: Dict[str, Any], schema_error: str | None, using_fallback: bool, api_base_url: str) -> None:
-    if schema_error is not None:
-        st.warning(
-            f"{schema_error} Using default schema. The form may not match the server's expectations."
-        )
-    else:
-        st.success(
-            f"Loaded schema from {api_base_url} ({len(schema['feature_order'])} features)"
-        )
