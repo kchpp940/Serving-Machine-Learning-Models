@@ -15,7 +15,7 @@ from car_pricing.feature_schema import (
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.versioning import compute_file_hash, compute_data_version, compute_model_hash
 from car_pricing.model_lineage import ModelLineage, build_fastapi_status
-from car_pricing.api_client import CarPricingClient
+from car_pricing.api_client import CarPricingClient, ApiError
 
 __all__ = [
     "FeatureSchema",
@@ -36,4 +36,5 @@ __all__ = [
     "ModelLineage",
     "build_fastapi_status",
     "CarPricingClient",
+    "ApiError",
 ]

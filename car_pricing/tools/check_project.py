@@ -189,6 +189,96 @@ def check_legacy_shim_path_manipulation(report: CheckReport) -> None:
         ))
 
 
+def check_api_error_contract(report: CheckReport) -> None:
+    api_client_mod, err = _safe_import("car_pricing.api_client")
+    if err or api_client_mod is None:
+        report.add(CheckResult(
+            name="api_client.error_type_import",
+            passed=False,
+            message=f"无法导入 car_pricing.api_client: {err}",
+        ))
+        return
+
+    ApiError = getattr(api_client_mod, "ApiError", None)
+    if ApiError is None:
+        report.add(CheckResult(
+            name="api_client.error_type_import",
+            passed=False,
+            message="car_pricing.api_client 中未导出 ApiError",
+        ))
+        return
+
+    report.add(CheckResult(
+        name="api_client.error_type_import",
+        passed=True,
+        message="ApiError 从 car_pricing.api_client 正常导出",
+    ))
+
+    required_fields = {"message", "source", "status_code", "detail", "context"}
+    required_methods = {"display"}
+
+    actual_fields = set()
+    if hasattr(ApiError, "__dataclass_fields__"):
+        actual_fields = set(ApiError.__dataclass_fields__.keys())
+    actual_methods = {m for m in dir(ApiError) if not m.startswith("_") and callable(getattr(ApiError, m, None))}
+
+    missing_fields = required_fields - actual_fields
+    missing_methods = required_methods - actual_methods
+
+    report.add(CheckResult(
+        name="api_client.error_type_structure",
+        passed=not missing_fields and not missing_methods,
+        message=(
+            "ApiError 契约字段和方法完整"
+            if not missing_fields and not missing_methods else
+            f"ApiError 契约不完整: 缺失字段 {sorted(missing_fields)}, 缺失方法 {sorted(missing_methods)}"
+        ),
+        details={
+            "fields": sorted(actual_fields),
+            "methods": sorted(actual_methods),
+            "missing_fields": sorted(missing_fields),
+            "missing_methods": sorted(missing_methods),
+        },
+    ))
+
+    CarPricingClient = getattr(api_client_mod, "CarPricingClient", None)
+    if CarPricingClient is None:
+        return
+
+    methods_to_check = ["fetch_schema", "predict", "health", "metadata", "status"]
+    contract_ok = True
+    contract_details = {}
+    for method_name in methods_to_check:
+        method = getattr(CarPricingClient, method_name, None)
+        if method is None:
+            contract_ok = False
+            contract_details[method_name] = "method missing"
+            continue
+        annotations = getattr(method, "__annotations__", {})
+        return_ann = annotations.get("return", None)
+        if return_ann is None:
+            contract_ok = False
+            contract_details[method_name] = "missing return annotation"
+            continue
+        return_str = str(return_ann)
+        if "ApiError" not in return_str:
+            contract_ok = False
+            contract_details[method_name] = f"return type does not include ApiError: {return_str}"
+        else:
+            contract_details[method_name] = "OK"
+
+    report.add(CheckResult(
+        name="api_client.client_return_contract",
+        passed=contract_ok,
+        message=(
+            "CarPricingClient 所有方法返回类型均包含 ApiError"
+            if contract_ok else
+            "CarPricingClient 部分方法返回契约不包含 ApiError"
+        ),
+        details=contract_details,
+    ))
+
+
 # ---------------------------------------------------------------------------
 # 2. Artifact checks — reuse ModelService for paths and loading
 # ---------------------------------------------------------------------------
@@ -658,6 +748,70 @@ def check_streamlit_boundary(report: CheckReport) -> None:
             details={"used": sorted(api_endpoints_used), "missing": sorted(missing_eps)},
         ))
 
+        imports_api_error = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith("car_pricing"):
+                    for alias in node.names:
+                        if alias.name == "ApiError":
+                            imports_api_error = True
+
+        uses_isinstance_apierror = False
+        structured_attr_accesses: Dict[str, int] = {}
+        string_errors: List[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id == "isinstance":
+                    for arg in node.args:
+                        if isinstance(arg, ast.Name) and arg.id == "ApiError":
+                            uses_isinstance_apierror = True
+                        if isinstance(arg, ast.Attribute) and arg.attr == "ApiError":
+                            uses_isinstance_apierror = True
+            if isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name) and node.value.id in ("err", "schema_error", "error", "api_err"):
+                    structured_attr_accesses[node.attr] = structured_attr_accesses.get(node.attr, 0) + 1
+            if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.IsNot):
+                if isinstance(node.left, ast.Name) and node.left.id in ("err", "schema_error", "error"):
+                    if isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None:
+                        string_errors.append(f"使用 `{node.left.id} is not None` 作为错误判定, 建议 isinstance(..., ApiError)")
+
+        structured_attr_required = {"message", "source", "status_code", "detail", "display"}
+        used_structured = set(structured_attr_accesses.keys()) & structured_attr_required
+
+        report.add(CheckResult(
+            name="frontend.structured_error_import",
+            passed=imports_api_error,
+            message=(
+                "Streamlit 从 car_pricing 导入了 ApiError"
+                if imports_api_error else
+                "Streamlit 未导入 ApiError, 无法消费结构化错误"
+            ),
+        ))
+
+        report.add(CheckResult(
+            name="frontend.structured_error_usage",
+            passed=uses_isinstance_apierror and bool(used_structured) and not string_errors,
+            message=(
+                (
+                    "Streamlit 使用 isinstance(..., ApiError) 判定错误"
+                    f" 并访问结构化属性: {sorted(used_structured)}"
+                )
+                if uses_isinstance_apierror and bool(used_structured) and not string_errors else
+                (
+                    "Streamlit 未正确消费结构化错误: "
+                    + ("缺少 isinstance(ApiError); " if not uses_isinstance_apierror else "")
+                    + ("缺少结构化属性访问; " if not used_structured else f"已访问 {sorted(used_structured)}; ")
+                    + (f"检测到字符串判定: {string_errors}" if string_errors else "")
+                )
+            ),
+            details={
+                "uses_isinstance_apierror": uses_isinstance_apierror,
+                "structured_accesses": structured_attr_accesses,
+                "string_error_patterns": string_errors,
+            },
+        ))
+
     except Exception as e:
         report.add(CheckResult(
             name="frontend.ast_analysis",
@@ -678,6 +832,7 @@ ALL_CHECKS: List[Callable[[CheckReport], None]] = [
     check_model_loadable,
     check_third_party_fastapi_not_shadowed,
     check_legacy_shim_path_manipulation,
+    check_api_error_contract,
     check_fastapi_app_and_contract,
     check_pydantic_schema_consistency,
     check_streamlit_boundary,

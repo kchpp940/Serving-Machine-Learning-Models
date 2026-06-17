@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
 import requests
@@ -15,6 +16,26 @@ from car_pricing.feature_schema import (
     WORD_TO_NUM_CYLINDERS,
     DRIVEWheel_DISPLAY,
 )
+
+
+@dataclass
+class ApiError:
+    message: str
+    source: str = "unknown"
+    status_code: Optional[int] = None
+    detail: Optional[str] = None
+    context: Dict[str, Any] = field(default_factory=dict)
+
+    def display(self) -> str:
+        parts = [self.message]
+        if self.detail:
+            parts.append(self.detail)
+        if self.status_code is not None:
+            parts.append(f"(status={self.status_code})")
+        return " ".join(p for p in parts if p)
+
+    def __str__(self) -> str:
+        return self.display()
 
 
 def _display_name(field_name: str, raw_class: str) -> str:
@@ -45,7 +66,7 @@ class CarPricingClient:
     def _url(self, endpoint: str) -> str:
         return f"{self._base_url}/{endpoint.lstrip('/')}"
 
-    def fetch_schema(self) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def fetch_schema(self) -> Tuple[Optional[Dict[str, Any]], Optional[ApiError]]:
         try:
             resp = self._session.get(self._url("/schema"), timeout=self._timeout)
             resp.raise_for_status()
@@ -53,72 +74,154 @@ class CarPricingClient:
             required = ["feature_order", "numeric_features", "categorical_features", "categorical_options"]
             missing = [k for k in required if k not in data]
             if missing:
-                return None, f"Schema missing fields: {', '.join(missing)}"
+                return None, ApiError(
+                    message="Schema response is incomplete",
+                    source="validation",
+                    status_code=resp.status_code,
+                    detail=f"Missing fields: {', '.join(missing)}",
+                    context={"endpoint": "/schema", "missing": missing},
+                )
             return data, None
-        except requests.exceptions.ConnectionError:
-            return None, "Unable to connect to the prediction service to fetch schema."
-        except requests.exceptions.Timeout:
-            return None, "Schema request timed out."
+        except requests.exceptions.ConnectionError as e:
+            return None, ApiError(
+                message="Unable to connect to the prediction service to fetch schema.",
+                source="connection",
+                detail=str(e),
+                context={"endpoint": "/schema", "base_url": self._base_url},
+            )
+        except requests.exceptions.Timeout as e:
+            return None, ApiError(
+                message="Schema request timed out.",
+                source="timeout",
+                detail=str(e),
+                context={"endpoint": "/schema", "timeout": self._timeout},
+            )
         except requests.exceptions.HTTPError as e:
-            detail = ""
+            detail = None
             try:
-                detail = resp.json().get("detail", "")
+                detail = resp.json().get("detail")
             except Exception:
                 pass
-            return None, f"Server returned error when fetching schema: {detail or str(e)}"
-        except ValueError:
-            return None, "Schema response was not valid JSON."
+            return None, ApiError(
+                message="Server returned error when fetching schema.",
+                source="http",
+                status_code=resp.status_code,
+                detail=detail or str(e),
+                context={"endpoint": "/schema", "status_code": resp.status_code},
+            )
+        except ValueError as e:
+            return None, ApiError(
+                message="Schema response was not valid JSON.",
+                source="json",
+                detail=str(e),
+                context={"endpoint": "/schema"},
+            )
         except Exception as e:
-            return None, f"Unexpected error fetching schema: {str(e)}"
+            return None, ApiError(
+                message="Unexpected error fetching schema.",
+                source="unknown",
+                detail=str(e),
+                context={"endpoint": "/schema", "exception_type": type(e).__name__},
+            )
 
-    def predict(self, values: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    def predict(self, values: Dict[str, Any]) -> Tuple[Optional[float], Optional[ApiError]]:
         try:
             resp = self._session.post(self._url("/predict"), json=values, timeout=self._timeout)
             resp.raise_for_status()
             body = resp.json()
             prediction = body.get("prediction")
             if prediction is None:
-                return None, f"Unexpected response format from server: {body}"
+                return None, ApiError(
+                    message="Unexpected response format from server.",
+                    source="validation",
+                    status_code=resp.status_code,
+                    detail=f"Response body missing 'prediction' field: {body}",
+                    context={"endpoint": "/predict"},
+                )
             return float(prediction), None
-        except requests.exceptions.ConnectionError:
-            return None, "Unable to connect to the prediction service. Please check that the API server is running."
-        except requests.exceptions.Timeout:
-            return None, "The request to the prediction service timed out. Please try again later."
+        except requests.exceptions.ConnectionError as e:
+            return None, ApiError(
+                message="Unable to connect to the prediction service. Please check that the API server is running.",
+                source="connection",
+                detail=str(e),
+                context={"endpoint": "/predict", "base_url": self._base_url},
+            )
+        except requests.exceptions.Timeout as e:
+            return None, ApiError(
+                message="The request to the prediction service timed out. Please try again later.",
+                source="timeout",
+                detail=str(e),
+                context={"endpoint": "/predict", "timeout": self._timeout},
+            )
         except requests.exceptions.HTTPError as e:
-            detail = ""
+            detail = None
             try:
-                detail = resp.json().get("detail", "")
+                detail = resp.json().get("detail")
             except Exception:
                 pass
-            return None, f"Server returned an error ({resp.status_code}): {detail or str(e)}"
-        except ValueError:
-            return None, "The server returned an invalid response. Please try again later."
+            return None, ApiError(
+                message="Server returned an error.",
+                source="http",
+                status_code=resp.status_code,
+                detail=detail or str(e),
+                context={"endpoint": "/predict", "status_code": resp.status_code},
+            )
+        except ValueError as e:
+            return None, ApiError(
+                message="The server returned an invalid response. Please try again later.",
+                source="json",
+                detail=str(e),
+                context={"endpoint": "/predict"},
+            )
         except Exception as e:
-            return None, f"An unexpected error occurred: {str(e)}"
+            return None, ApiError(
+                message="An unexpected error occurred.",
+                source="unknown",
+                detail=str(e),
+                context={"endpoint": "/predict", "exception_type": type(e).__name__},
+            )
 
-    def health(self) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def health(self) -> Tuple[Optional[Dict[str, Any]], Optional[ApiError]]:
         try:
             resp = self._session.get(self._url("/health"), timeout=self._timeout)
             resp.raise_for_status()
             return resp.json(), None
+        except requests.exceptions.ConnectionError as e:
+            return None, ApiError(message="Connection failed.", source="connection", detail=str(e), context={"endpoint": "/health"})
+        except requests.exceptions.Timeout as e:
+            return None, ApiError(message="Request timed out.", source="timeout", detail=str(e), context={"endpoint": "/health"})
+        except requests.exceptions.HTTPError as e:
+            return None, ApiError(message="Server returned error.", source="http", status_code=resp.status_code, detail=str(e), context={"endpoint": "/health"})
         except Exception as e:
-            return None, str(e)
+            return None, ApiError(message="Unexpected error.", source="unknown", detail=str(e), context={"endpoint": "/health", "exception_type": type(e).__name__})
 
-    def metadata(self) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def metadata(self) -> Tuple[Optional[Dict[str, Any]], Optional[ApiError]]:
         try:
             resp = self._session.get(self._url("/metadata"), timeout=self._timeout)
             resp.raise_for_status()
             return resp.json(), None
+        except requests.exceptions.ConnectionError as e:
+            return None, ApiError(message="Connection failed.", source="connection", detail=str(e), context={"endpoint": "/metadata"})
+        except requests.exceptions.Timeout as e:
+            return None, ApiError(message="Request timed out.", source="timeout", detail=str(e), context={"endpoint": "/metadata"})
+        except requests.exceptions.HTTPError as e:
+            return None, ApiError(message="Server returned error.", source="http", status_code=resp.status_code, detail=str(e), context={"endpoint": "/metadata"})
         except Exception as e:
-            return None, str(e)
+            return None, ApiError(message="Unexpected error.", source="unknown", detail=str(e), context={"endpoint": "/metadata", "exception_type": type(e).__name__})
 
-    def status(self) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def status(self) -> Tuple[Optional[Dict[str, Any]], Optional[ApiError]]:
         try:
             resp = self._session.get(self._url("/status"), timeout=self._timeout)
             resp.raise_for_status()
             return resp.json(), None
+        except requests.exceptions.ConnectionError as e:
+            return None, ApiError(message="Connection failed.", source="connection", detail=str(e), context={"endpoint": "/status"})
+        except requests.exceptions.Timeout as e:
+            return None, ApiError(message="Request timed out.", source="timeout", detail=str(e), context={"endpoint": "/status"})
+        except requests.exceptions.HTTPError as e:
+            return None, ApiError(message="Server returned error.", source="http", status_code=resp.status_code, detail=str(e), context={"endpoint": "/status"})
         except Exception as e:
-            return None, str(e)
+            return None, ApiError(message="Unexpected error.", source="unknown", detail=str(e), context={"endpoint": "/status", "exception_type": type(e).__name__})
 
     @staticmethod
     def build_fallback_schema() -> Dict[str, Any]:

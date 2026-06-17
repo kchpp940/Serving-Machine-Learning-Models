@@ -1,6 +1,6 @@
 import streamlit as st
 
-from car_pricing.api_client import CarPricingClient
+from car_pricing.api_client import CarPricingClient, ApiError
 from car_pricing.feature_schema import FIELD_DISPLAY_NAMES
 
 client = CarPricingClient()
@@ -46,8 +46,8 @@ def main():
     """)
 
     schema, schema_error = fetch_schema()
-    if schema_error is not None:
-        st.warning(f"{schema_error} Using default schema. The form may not match the server's expectations.")
+    if isinstance(schema_error, ApiError):
+        st.warning(f"{schema_error.message} Using default schema. The form may not match the server's expectations.")
         schema = CarPricingClient.build_fallback_schema()
     else:
         st.success(f"Loaded schema from {client.base_url} ({len(schema['feature_order'])} features)")
@@ -67,8 +67,13 @@ def main():
             values[field] = inputs[field]
 
         prediction, err = client.predict(values)
-        if err is not None:
-            st.error(err)
+        if isinstance(err, ApiError):
+            if err.source == "connection":
+                st.error(f"{err.message} {err.detail or ''}")
+            elif err.source == "http" and err.status_code is not None:
+                st.error(f"{err.message} (status {err.status_code}): {err.detail or ''}")
+            else:
+                st.error(err.display())
         else:
             st.success(f"The Price of the {names} is {prediction:.2f}$")
 
