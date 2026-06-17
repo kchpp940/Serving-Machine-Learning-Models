@@ -636,6 +636,17 @@ def check_streamlit_boundary(report: CheckReport) -> None:
         ))
 
         expected_endpoints = {"/schema", "/predict"}
+        if imports_shared_client and not api_endpoints_used:
+            from car_pricing import api_client as _ac_mod
+            ac_source = Path(_ac_mod.__file__).read_text(encoding="utf-8")
+            ac_tree = ast.parse(ac_source)
+            for node in ast.walk(ac_tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    _scan_string_for_endpoints(node.value)
+                elif isinstance(node, ast.JoinedStr):
+                    for v in node.values:
+                        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                            _scan_string_for_endpoints(v.value)
         missing_eps = expected_endpoints - api_endpoints_used
         report.add(CheckResult(
             name="frontend.api_endpoints_used",
