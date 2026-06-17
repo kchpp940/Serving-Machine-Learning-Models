@@ -1,15 +1,10 @@
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(__file__))
-
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, FileResponse
 
-from services.model_service import ModelService
-from routers.prediction import router as prediction_router
-from routers.schema import router as schema_router
-from routers.meta import router as meta_router
+from car_pricing_api.services.model_service import ModelService
+from car_pricing_api.routers.prediction import router as prediction_router
+from car_pricing_api.routers.schema import router as schema_router
+from car_pricing_api.routers.meta import router as meta_router
 
 
 app = FastAPI(

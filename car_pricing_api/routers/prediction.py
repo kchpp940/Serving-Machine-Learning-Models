@@ -1,12 +1,7 @@
-import sys
-import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from fastapi import APIRouter, HTTPException
 
-from models import CarPrediction, PredictionResponse
-from services.model_service import ModelService
+from car_pricing_api.models import CarPrediction, PredictionResponse
+from car_pricing_api.services.model_service import ModelService
 
 router = APIRouter(tags=["Prediction"])
 

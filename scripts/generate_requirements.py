@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""从 pyproject.toml 生成各部署目录的 requirements.txt。
+"""从 pyproject.toml 生成各部署目录的 requirements.txt，并检查入口中无 sys.path.insert。
 
 依赖来源唯一：根目录 pyproject.toml 中的 [project] dependencies 和
 [project.optional-dependencies] 分组。生成的 requirements.txt 是具体的
 依赖列表，在 Docker、Heroku、BentoML 等不同构建上下文中都能稳定解析。
 
+同时扫描部署入口文件，确保不再依赖 sys.path.insert 来支撑裸导入。
+
 用法：
-    python scripts/generate_requirements.py           # 生成所有 requirements.txt
-    python scripts/generate_requirements.py --verify  # 校验现有文件是否最新
+    python scripts/generate_requirements.py           # 生成所有 requirements.txt + 检查
+    python scripts/generate_requirements.py --verify  # 校验现有文件是否最新 + 检查
     python scripts/generate_requirements.py --dry-run # 仅打印不写入
 """
 from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import sys
 from pathlib import Path
 
@@ -26,6 +29,34 @@ DEPLOYMENT_GROUPS: dict[str, tuple[str, ...]] = {
     "streamlitapp": ("core", "streamlit"),
     "bentoml": ("core", "bentoml"),
     "flaskapp": ("core", "flask"),
+}
+
+SYS_PATH_INSERT_PATTERN = re.compile(r"sys\.path\.insert\s*\(")
+
+ENTRY_FILES: dict[str, list[str]] = {
+    "car_pricing_api": [
+        "app.py",
+        "routers/prediction.py",
+        "routers/schema.py",
+        "routers/meta.py",
+        "models.py",
+        "train.py",
+        "services/model_service.py",
+    ],
+    "fastapi": [
+        "app.py",
+        "train.py",
+    ],
+    "bentoml": [
+        "service.py",
+        "bentosklearn.py",
+    ],
+    "flaskapp": [
+        "utils.py",
+    ],
+    "streamlitapp": [
+        "streamlit_app.py",
+    ],
 }
 
 HEADER = """\
@@ -111,6 +142,23 @@ def print_diff(path: Path, expected: str) -> None:
     sys.stdout.writelines(diff)
 
 
+def check_sys_path_insert() -> list[tuple[str, int, str]]:
+    """扫描入口文件，返回包含 sys.path.insert 的 (相对路径, 行号, 行内容) 列表。"""
+    violations: list[tuple[str, int, str]] = []
+
+    for dir_name, files in ENTRY_FILES.items():
+        for fname in files:
+            fpath = ROOT / dir_name / fname
+            if not fpath.exists():
+                continue
+            for lineno, line in enumerate(fpath.read_text(encoding="utf-8").splitlines(), start=1):
+                if SYS_PATH_INSERT_PATTERN.search(line):
+                    rel = f"{dir_name}/{fname}"
+                    violations.append((rel, lineno, line.strip()))
+
+    return violations
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--verify", action="store_true", help="仅校验，不写入；不一致时报错退出")
@@ -124,6 +172,7 @@ def main() -> int:
     data = parse_pyproject()
     exit_code = 0
 
+    # ── 阶段 1：生成 / 校验 requirements.txt ──
     for target_dir, groups in DEPLOYMENT_GROUPS.items():
         try:
             deps = collect_deps(data, groups)
@@ -148,11 +197,26 @@ def main() -> int:
             print_diff(path, content)
             print()
 
+    # ── 阶段 2：检查入口文件中无 sys.path.insert ──
+    print()
+    violations = check_sys_path_insert()
+    if violations:
+        exit_code = 1
+        print("[FAIL] 以下入口文件仍包含 sys.path.insert：")
+        for rel, lineno, line in violations:
+            print(f"  {rel}:{lineno}  {line}")
+        print()
+        print("请改用包绝对导入（如 from car_pricing_api.models import ...），")
+        print("确保可编辑安装后所有模块可稳定导入，无需手动调整 sys.path。")
+    else:
+        print("[OK] 所有入口文件均无 sys.path.insert，依赖可编辑安装稳定导入。")
+
+    # ── 汇总 ──
     if args.verify:
         if exit_code == 0:
-            print("\n[OK] 所有 requirements.txt 均为最新。")
+            print("\n[OK] 所有 requirements.txt 均为最新，入口文件无 sys.path.insert。")
         else:
-            print("\n[FAIL] 部分 requirements.txt 与 pyproject.toml 不一致。", file=sys.stderr)
+            print("\n[FAIL] 校验未通过，请修复上述问题。", file=sys.stderr)
     elif not args.dry_run:
         print(f"\n完成。生成/更新了 {len(DEPLOYMENT_GROUPS)} 个部署目录的 requirements.txt。")
         print("提示：在 Dockerfile / 启动脚本中使用以下统一安装模式：")

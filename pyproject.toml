@@ -57,11 +57,10 @@ all = [
 car-pricing-train = "car_pricing.tools.train:main"
 
 [tool.setuptools.packages.find]
-include = ["car_pricing*"]
+include = ["car_pricing*", "car_pricing_api*"]
 exclude = [
     "androidapp*",
     "bentoml*",
-    "car_pricing_api*",
     "fastapi*",
     "flaskapp*",
     "mlflow*",
