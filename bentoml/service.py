@@ -1,29 +1,18 @@
 import os
 
+import bentoml
 import numpy as np
 import pandas as pd
-
+from bentoml.io import NumpyNdarray, PandasDataFrame
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
 
-try:
-    import bentoml
-    from bentoml.io import NumpyNdarray, PandasDataFrame
-
-    try:
-        predictor = bentoml.models.get("gbr:latest").to_runner()
-        svc = bentoml.Service("gbr", runners=[predictor])
-    except Exception:
-        svc = bentoml.Service("gbr", runners=[])
-except ImportError:
-    bentoml = None
-    svc = None
+predictor = bentoml.sklearn.get("gbr:latest").to_runner()
+svc = bentoml.Service("gbr", runners=[predictor])
 
 
 def _get_schema():
-    if bentoml is None:
-        raise RuntimeError("BentoML is not installed")
-    raw_bundle = bentoml.picklable_model.load_model("gbr:latest")
+    raw_bundle = bentoml.sklearn.load_model("gbr:latest")
     model = CarPriceModel.from_sklearn_object(raw_bundle)
     return model
 
@@ -39,18 +28,17 @@ def get_model():
     return _model
 
 
-if svc is not None:
-    @svc.api(input=PandasDataFrame(), output=NumpyNdarray())
-    def predict(df: pd.DataFrame) -> np.ndarray:
-        model = get_model()
+@svc.api(input=PandasDataFrame(), output=NumpyNdarray())
+def predict(df: pd.DataFrame) -> np.ndarray:
+    model = get_model()
 
-        missing_cols = set(FEATURE_ORDER) - set(df.columns)
-        if missing_cols:
-            raise ValueError(f"输入数据缺少列: {missing_cols}")
+    missing_cols = set(FEATURE_ORDER) - set(df.columns)
+    if missing_cols:
+        raise ValueError(f"Input DataFrame missing required columns: {missing_cols}")
 
-        extra_cols = set(df.columns) - set(FEATURE_ORDER)
-        if extra_cols:
-            df = df[FEATURE_ORDER]
+    extra_cols = set(df.columns) - set(FEATURE_ORDER)
+    if extra_cols:
+        df = df[FEATURE_ORDER]
 
-        result = model.predict_dataframe(df)
-        return np.array(result)
+    result = model.predict_dataframe(df)
+    return np.array(result)

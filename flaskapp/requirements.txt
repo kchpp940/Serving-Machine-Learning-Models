@@ -1,2 +1,11 @@
-# 核心包 + Flask 依赖（从根目录 pyproject.toml 安装）
--e ../.[flask]
+# ============================================================
+# AUTO-GENERATED from ../../pyproject.toml — 不要手动修改
+# Run `python scripts/generate_requirements.py` to regenerate
+# ============================================================
+
+numpy>=1.24,<2.0
+pandas>=2.0,<3.0
+scikit-learn>=1.3,<2.0
+joblib>=1.3,<2.0
+flask>=2.3,<3.0
+gunicorn>=21.0,<22.0

@@ -62,7 +62,7 @@ exclude = [
     "androidapp*",
     "bentoml*",
     "car_pricing_api*",
-    "legacy_fastapi*",
+    "fastapi*",
     "flaskapp*",
     "mlflow*",
     "notebooks*",

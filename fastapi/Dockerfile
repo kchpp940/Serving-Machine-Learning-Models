@@ -27,17 +27,18 @@ RUN apt-get -y update  && apt-get install -y \
 
 RUN pip install --upgrade setuptools pip wheel
 
-# 复制根目录的 pyproject.toml 和核心包源码
+# 步骤 1：复制项目根配置和 car_pricing 核心包（供可编辑安装使用）
 COPY pyproject.toml /app/
 COPY car_pricing /app/car_pricing/
 
-# 复制 FastAPI shim 目录文件
+# 步骤 2：复制部署目录
 COPY fastapi /app/fastapi/
 
-# 安装核心包 + API 依赖（可编辑安装以便导入）
-RUN pip install -e ".[api]"
-
-# 设置工作目录到 FastAPI 目录
+# 步骤 3：统一安装模式
+#   - 先安装第三方依赖（从生成的 requirements.txt）
+#   - 再以 --no-deps 安装 car_pricing 包本身，确保导入路径稳定
 WORKDIR /app/fastapi
+RUN pip install -r requirements.txt \
+ && pip install --no-deps -e /app
 
 CMD gunicorn -w 3 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:$PORT
