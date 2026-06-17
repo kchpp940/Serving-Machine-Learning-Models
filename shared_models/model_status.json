@@ -1,12 +1,18 @@
 {
   "status": "ready",
-  "model_name": "test_model",
-  "model_type": "TestType",
-  "schema_version": "abc123",
-  "data_version": "def456",
-  "model_artifact_hash": "ghi789",
+  "model_name": "sklearn_gbr",
+  "model_type": "GradientBoostingRegressor",
+  "schema_version": "d300535317df3292",
+  "data_version": "2d180da826cd6acc",
+  "model_artifact_hash": "0c72b966f3b083bc19e7eb885e3b19adae9113ac2ac8936206515c8d0bceb58f",
   "metrics": {
-    "r2": 0.95
+    "r2_score": 0.9069584095989147,
+    "mse": 6937927.768539871,
+    "mae": 1803.7634999064694
   },
-  "loaded_at": "2026-06-16T13:31:06.889689"
+  "params": {
+    "model_name": "sklearn_gbr",
+    "model_type": "GradientBoostingRegressor",
+    "n_features": 10
+  }
 }
