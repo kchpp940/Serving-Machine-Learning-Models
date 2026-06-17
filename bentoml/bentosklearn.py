@@ -1,9 +1,5 @@
-import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-import bentoml
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import train_test_split
@@ -16,6 +12,11 @@ from car_pricing.feature_schema import (
 
 
 def main():
+    try:
+        import bentoml
+    except ImportError:
+        raise RuntimeError("BentoML is not installed")
+
     csv_path = os.path.join(os.path.dirname(__file__), "Data", "cars.csv")
     df = load_training_data(csv_path)
 
@@ -30,7 +31,7 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    bentoml.sklearn.save("gbr", bundle)
+    bentoml.picklable_model.save("gbr", bundle)
 
     print(f"Model saved to BentoML")
     print(f"Feature order: {schema.feature_order}")

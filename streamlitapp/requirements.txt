@@ -1,1 +1,2 @@
-streamlit
+# 核心包 + Streamlit 依赖（从根目录 pyproject.toml 安装）
+-e ../.[streamlit]

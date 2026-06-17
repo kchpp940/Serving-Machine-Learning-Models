@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from car_pricing.feature_schema import FEATURE_ORDER, CATEGORICAL_FEATURES
 

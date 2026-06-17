@@ -1,6 +1,2 @@
-flask[all]
-numpy
-pandas
-joblib
-scikit_learn==1.1.1
-gunicorn
+# 核心包 + Flask 依赖（从根目录 pyproject.toml 安装）
+-e ../.[flask]

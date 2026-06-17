@@ -1,13 +1,14 @@
-service: "service:svc" # where the bentoml.Service instance is defined
+service: "service:svc"
 include:
   - "*.py"
+  - "../pyproject.toml"
 exclude:
   - "tests/"
 python:
   packages:
-    - numpy
-    - pandas
-    - pycaret
+    - pip
+  requirements_txt: "./requirements.txt"
+  lock_packages: false
 docker:
   distro: debian
-  cuda_version: 11.6.2
+  python_version: "3.10"

@@ -1,13 +1,15 @@
 import os
 
+import pandas as pd
+import joblib
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi import HTTPException
+from models import CarPrediction, PredictionResponse
 import numpy as np
 
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.feature_schema import FEATURE_ORDER
-from car_pricing_api.models import CarPrediction, PredictionResponse
 
 
 app = FastAPI(
