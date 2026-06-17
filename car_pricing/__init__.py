@@ -4,8 +4,6 @@ from car_pricing.feature_schema import (
     NUMERIC_FEATURES,
     CATEGORICAL_FEATURES,
     TARGET_COLUMN,
-    FIELD_DISPLAY_NAMES,
-    FIELD_DEFAULT_VALUES,
     load_training_data,
     prepare_training_data,
     bundle_model,
@@ -15,7 +13,6 @@ from car_pricing.feature_schema import (
 from car_pricing.model_runtime import CarPriceModel
 from car_pricing.versioning import compute_file_hash, compute_data_version, compute_model_hash
 from car_pricing.model_lineage import ModelLineage, build_fastapi_status
-from car_pricing.api_client import CarPricingClient, ApiError
 
 __all__ = [
     "FeatureSchema",
@@ -23,8 +20,6 @@ __all__ = [
     "NUMERIC_FEATURES",
     "CATEGORICAL_FEATURES",
     "TARGET_COLUMN",
-    "FIELD_DISPLAY_NAMES",
-    "FIELD_DEFAULT_VALUES",
     "load_training_data",
     "prepare_training_data",
     "bundle_model",
@@ -35,6 +30,4 @@ __all__ = [
     "compute_model_hash",
     "ModelLineage",
     "build_fastapi_status",
-    "CarPricingClient",
-    "ApiError",
 ]
