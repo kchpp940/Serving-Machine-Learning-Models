@@ -11,7 +11,8 @@ from car_pricing.feature_schema import (
 )
 
 from car_pricing.model_runtime import CarPriceModel
-from car_pricing.api_client import ApiError, fetch_schema, predict, fetch_health, fetch_status, fetch_metadata
+from car_pricing.versioning import compute_file_hash, compute_data_version, compute_model_hash
+from car_pricing.model_lineage import ModelLineage, build_fastapi_status
 
 __all__ = [
     "FeatureSchema",
@@ -24,10 +25,9 @@ __all__ = [
     "bundle_model",
     "is_model_bundle",
     "CarPriceModel",
-    "ApiError",
-    "fetch_schema",
-    "predict",
-    "fetch_health",
-    "fetch_status",
-    "fetch_metadata",
+    "compute_file_hash",
+    "compute_data_version",
+    "compute_model_hash",
+    "ModelLineage",
+    "build_fastapi_status",
 ]
