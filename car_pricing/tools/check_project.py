@@ -567,25 +567,33 @@ class ProjectChecker:
         with open(app_path, "r", encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source)
-        local_imports = []
-        bad_imports = []
+        bare_imports = []
+        sys_path_hacks = []
+        details = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 mod = node.module or ""
                 if mod in ("models", "services", "routers"):
-                    local_imports.append(f"from {mod} import ...")
-                    target_path = fastapi_dir / f"{mod}.py"
-                    if not target_path.exists() and not (fastapi_dir / mod / "__init__.py").exists():
-                        bad_imports.append(f"from {mod} import ... — fastapi/ 下无对应模块，将依赖 sys.path 注入")
-        passed = not bad_imports
-        details = local_imports or ["未检测到本地模块导入"]
-        if bad_imports:
-            details.append(f"存在无对应模块文件的导入（依赖 sys.path hack）: {bad_imports}")
+                    names = ", ".join(a.name for a in node.names)
+                    bare_imports.append(f"from {mod} import {names}")
+            if isinstance(node, ast.Call):
+                func = node.func
+                if (isinstance(func, ast.Attribute) and func.attr == "insert"
+                        and isinstance(func.value, ast.Attribute) and func.value.attr == "path"
+                        and isinstance(func.value.value, ast.Name) and func.value.value.id == "sys"):
+                    sys_path_hacks.append("sys.path.insert(...)")
+        if bare_imports:
+            details.append(f"裸模块导入: {bare_imports}")
+        if sys_path_hacks:
+            details.append(f"sys.path hack: {sys_path_hacks}")
+        passed = not bare_imports and not sys_path_hacks
+        if passed:
+            details.append("所有导入均使用显式包路径，无 sys.path hack")
         self._record(CheckResult(
             name="old_fastapi_shim_no_local_models",
             category="fastapi_shim",
             passed=passed,
-            message="旧 fastapi shim 导入结构清晰" if passed else "旧 fastapi shim 使用依赖 sys.path 注入的本地导入，可能遮蔽第三方包",
+            message="旧 fastapi shim 导入结构清晰" if passed else "旧 fastapi shim 存在裸模块导入或 sys.path hack，应改用显式包路径",
             details=details,
         ))
 
