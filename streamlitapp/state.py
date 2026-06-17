@@ -6,14 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
-from car_pricing.api_client import (
-    ApiError,
-    fetch_schema,
-    predict as _api_predict,
-    fetch_health,
-    fetch_status,
-    fetch_metadata,
-)
 
 APP_TITLE = "Car Price Prediction Web App"
 
@@ -102,43 +94,32 @@ def get_schema_cache() -> Optional[Dict[str, Any]]:
     return st.session_state[SCHEMA_CACHE_KEY]
 
 
+def set_schema_cache(schema: Dict[str, Any]) -> None:
+    st.session_state[SCHEMA_CACHE_KEY] = schema
+    st.session_state[SCHEMA_FETCHED_AT_KEY] = datetime.now()
+    st.session_state[SCHEMA_ERROR_KEY] = None
+
+
 def get_schema_fetched_at() -> Optional[datetime]:
     return st.session_state[SCHEMA_FETCHED_AT_KEY]
 
 
-def get_schema_error() -> Optional[ApiError]:
+def get_schema_error() -> Optional[Any]:
     return st.session_state[SCHEMA_ERROR_KEY]
+
+
+def set_schema_error(error: Any) -> None:
+    st.session_state[SCHEMA_ERROR_KEY] = error
 
 
 def has_schema() -> bool:
     return st.session_state[SCHEMA_CACHE_KEY] is not None
 
 
-def ensure_schema() -> Optional[Dict[str, Any]]:
-    if has_schema():
-        return st.session_state[SCHEMA_CACHE_KEY]
-    if st.session_state[SCHEMA_ERROR_KEY] is not None:
-        return None
-
-    data, error = fetch_schema()
-    if error is not None:
-        st.session_state[SCHEMA_ERROR_KEY] = error
-        return None
-
-    st.session_state[SCHEMA_CACHE_KEY] = data
-    st.session_state[SCHEMA_FETCHED_AT_KEY] = datetime.now()
-    st.session_state[SCHEMA_ERROR_KEY] = None
-    return data
-
-
 def clear_schema_cache() -> None:
     st.session_state[SCHEMA_CACHE_KEY] = None
     st.session_state[SCHEMA_FETCHED_AT_KEY] = None
     st.session_state[SCHEMA_ERROR_KEY] = None
-
-
-def run_predict(values: Dict[str, Any]) -> Tuple[Optional[float], Optional[ApiError]]:
-    return _api_predict(values)
 
 
 def get_prediction_results() -> List[PredictionResult]:
@@ -182,6 +163,11 @@ def get_service_status() -> Optional[Dict[str, Any]]:
     return st.session_state[SERVICE_STATUS_KEY]
 
 
+def set_service_status(status: Dict[str, Any]) -> None:
+    st.session_state[SERVICE_STATUS_KEY] = status
+    st.session_state[SERVICE_STATUS_REFRESHED_AT_KEY] = datetime.now()
+
+
 def get_service_status_refreshed_at() -> Optional[datetime]:
     return st.session_state[SERVICE_STATUS_REFRESHED_AT_KEY]
 
@@ -190,36 +176,16 @@ def get_service_health() -> Optional[Dict[str, Any]]:
     return st.session_state[SERVICE_HEALTH_KEY]
 
 
+def set_service_health(health: Dict[str, Any]) -> None:
+    st.session_state[SERVICE_HEALTH_KEY] = health
+
+
 def get_service_metadata() -> Optional[Dict[str, Any]]:
     return st.session_state[SERVICE_METADATA_KEY]
 
 
-def refresh_service_status() -> Tuple[bool, Optional[ApiError]]:
-    last_error: Optional[ApiError] = None
-
-    status_data, status_err = fetch_status()
-    if status_err is not None:
-        last_error = status_err
-    else:
-        st.session_state[SERVICE_STATUS_KEY] = status_data
-        st.session_state[SERVICE_STATUS_REFRESHED_AT_KEY] = datetime.now()
-
-    health_data, health_err = fetch_health()
-    if health_err is not None:
-        if last_error is None:
-            last_error = health_err
-    else:
-        st.session_state[SERVICE_HEALTH_KEY] = health_data
-
-    metadata_data, metadata_err = fetch_metadata()
-    if metadata_err is not None:
-        if last_error is None:
-            last_error = metadata_err
-    else:
-        st.session_state[SERVICE_METADATA_KEY] = metadata_data
-
-    success = st.session_state[SERVICE_STATUS_KEY] is not None
-    return success, last_error
+def set_service_metadata(metadata: Dict[str, Any]) -> None:
+    st.session_state[SERVICE_METADATA_KEY] = metadata
 
 
 def get_error_message() -> Optional[str]:

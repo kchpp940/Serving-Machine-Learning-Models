@@ -5,7 +5,7 @@ import json
 import pandas as pd
 import streamlit as st
 
-from car_pricing.api_client import API_BASE_URL
+from car_pricing.api_client import API_BASE_URL, fetch_status, fetch_health, fetch_metadata
 import state
 
 
@@ -25,6 +25,33 @@ def _format_dict_as_table(data: dict, title: str) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _refresh_all():
+    last_error = None
+
+    status_data, status_err = fetch_status()
+    if status_err is not None:
+        last_error = status_err
+    else:
+        state.set_service_status(status_data)
+
+    health_data, health_err = fetch_health()
+    if health_err is not None:
+        if last_error is None:
+            last_error = health_err
+    else:
+        state.set_service_health(health_data)
+
+    metadata_data, metadata_err = fetch_metadata()
+    if metadata_err is not None:
+        if last_error is None:
+            last_error = metadata_err
+    else:
+        state.set_service_metadata(metadata_data)
+
+    success = state.get_service_status() is not None
+    return success, last_error
+
+
 def render() -> None:
     st.header("System Status")
 
@@ -38,7 +65,7 @@ def render() -> None:
     col1, col2 = st.columns([1, 3])
     with col1:
         if st.button("Refresh Status", key="sys_refresh_btn"):
-            success, error = state.refresh_service_status()
+            success, error = _refresh_all()
             if success:
                 state.set_success_message("Service status refreshed successfully.")
             else:
@@ -49,7 +76,7 @@ def render() -> None:
             st.caption(f"Last refreshed: {refreshed_at.strftime('%Y-%m-%d %H:%M:%S')}")
 
     if state.get_service_status() is None:
-        state.refresh_service_status()
+        _refresh_all()
 
     error_msg, success_msg = state.consume_messages()
     if error_msg:

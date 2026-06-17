@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import streamlit as st
 
-from car_pricing.api_client import API_BASE_URL, ApiError
+from car_pricing.api_client import API_BASE_URL, fetch_schema, predict
 import state
 import ui_helpers
+
+
+def _ensure_schema():
+    if state.has_schema():
+        return state.get_schema_cache(), None
+    if state.get_schema_error() is not None:
+        return None, state.get_schema_error()
+    data, error = fetch_schema()
+    if error is not None:
+        state.set_schema_error(error)
+        return None, error
+    state.set_schema_cache(data)
+    return data, None
 
 
 def render() -> None:
@@ -16,8 +29,7 @@ def render() -> None:
     """
     )
 
-    schema = state.ensure_schema()
-    schema_error = state.get_schema_error()
+    schema, schema_error = _ensure_schema()
 
     if schema_error is not None:
         st.warning(
@@ -43,7 +55,7 @@ def render() -> None:
             state.set_error_message("Please enter the name of the car.")
         else:
             values = {field: inputs[field] for field in schema["feature_order"]}
-            prediction, error = state.run_predict(values)
+            prediction, error = predict(values)
             if error is not None:
                 state.set_error_message(str(error))
             else:
