@@ -286,6 +286,53 @@ def _check_fastapi_shim() -> str:
     return f"routes={len(mod.app.routes)}"
 
 
+CANONICAL_MODEL_DIR = "car_pricing_api/models"
+MODEL_ARTIFACT_PATTERN = re.compile(r"sklearn_gbr\.pkl$")
+
+MODEL_ARTIFACT_DIRS: list[str] = [
+    "car_pricing_api/models",
+    "fastapi/models",
+    "flaskapp/models",
+]
+
+
+def check_model_artifact_drift() -> tuple[bool, list[str]]:
+    """检查模型产物是否只有一个规范副本，无重复或漂移。
+
+    返回 (通过, 诊断信息列表)。
+    """
+    import hashlib
+
+    canonical_path = ROOT / CANONICAL_MODEL_DIR / "sklearn_gbr.pkl"
+    if not canonical_path.exists():
+        return False, [f"规范模型文件不存在: {CANONICAL_MODEL_DIR}/sklearn_gbr.pkl"]
+
+    canonical_hash = hashlib.sha256(canonical_path.read_bytes()).hexdigest()
+    messages: list[str] = []
+    duplicates: list[str] = []
+
+    for artifact_dir in MODEL_ARTIFACT_DIRS:
+        if artifact_dir == CANONICAL_MODEL_DIR:
+            continue
+        pkl_path = ROOT / artifact_dir / "sklearn_gbr.pkl"
+        if pkl_path.exists():
+            other_hash = hashlib.sha256(pkl_path.read_bytes()).hexdigest()
+            rel = f"{artifact_dir}/sklearn_gbr.pkl"
+            if other_hash == canonical_hash:
+                duplicates.append(rel)
+            else:
+                duplicates.append(rel)
+                messages.append(f"{rel}: hash={other_hash[:12]}... ≠ canonical={canonical_hash[:12]}... (版本漂移!)")
+
+    if duplicates:
+        messages.insert(0, f"发现 {len(duplicates)} 个重复模型副本（应仅保留 {CANONICAL_MODEL_DIR}/）:")
+        for d in duplicates:
+            messages.append(f"  - {d}")
+        return False, messages
+
+    return True, [f"模型产物单源: {CANONICAL_MODEL_DIR}/sklearn_gbr.pkl (sha256={canonical_hash[:12]}...)"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--verify", action="store_true", help="仅校验，不写入；不一致时报错退出")
@@ -356,6 +403,19 @@ def main() -> int:
             print()
             print("[FAIL] 运行时验证未通过。请检查 pyproject.toml 中的依赖版本约束，", file=sys.stderr)
             print("       确保模型文件与当前 numpy / scikit-learn / joblib 版本兼容。", file=sys.stderr)
+
+        print()
+        print("── 模型产物单源检查 ──")
+        drift_ok, drift_messages = check_model_artifact_drift()
+        if drift_ok:
+            for msg in drift_messages:
+                print(f"  [OK] {msg}")
+        else:
+            exit_code = 1
+            for msg in drift_messages:
+                print(f"  [FAIL] {msg}")
+            print()
+            print("请删除重复副本，让所有入口统一引用 car_pricing_api/models/ 中的模型。", file=sys.stderr)
 
     # ── 汇总 ──
     if args.verify or args.check_runtime:

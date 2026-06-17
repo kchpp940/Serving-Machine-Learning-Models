@@ -5,6 +5,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import train_test_split
 import joblib
 
+import car_pricing_api
 from car_pricing.feature_schema import (
     load_training_data,
     prepare_training_data,
@@ -26,7 +27,7 @@ def main():
 
     bundle = bundle_model(model, schema)
 
-    model_dir = os.path.join(os.path.dirname(__file__), "models")
+    model_dir = os.path.join(os.path.dirname(car_pricing_api.__file__), "models")
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(model_dir, "sklearn_gbr.pkl")
     joblib.dump(bundle, model_path)

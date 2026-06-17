@@ -30,6 +30,7 @@ RUN pip install --upgrade setuptools pip wheel
 # 步骤 1：复制项目根配置和 car_pricing 核心包（供可编辑安装使用）
 COPY pyproject.toml /app/
 COPY car_pricing /app/car_pricing/
+COPY car_pricing_api /app/car_pricing_api/
 
 # 步骤 2：复制部署目录
 COPY fastapi /app/fastapi/
